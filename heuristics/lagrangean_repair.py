@@ -93,7 +93,7 @@ def _phase1_core(
     Returns (core, rows_used, cols_used, forbidden), where forbidden is the
     set of edges that conflict with any core edge.
     """
-    x_set = set(x_star)
+    x_set = set(tuple(e) for e in x_star)
     degree_in_x = {e: len(neighbours[e] & x_set) for e in x_set}
     sorted_edges = sorted(
         x_set,
@@ -225,7 +225,7 @@ def repair(
     core, rows_used, cols_used, forbidden = _phase1_core(x_star, cost, neighbours, ordering)
     completed = _phase2_completion(core, n, cost, neighbours, rows_used, cols_used, forbidden, ordering, E0)
 
-    assignment = sorted(completed, key=lambda e: e[0])
+    assignment = sorted([tuple(e) for e in completed], key=lambda e: e[0])
     feasible = len(assignment) == n and len(set(assignment)) == n and len(ab.find_violations(assignment, conflicts, n)) == 0
     objective = float(sum(cost[i, j] for i, j in assignment)) if feasible else 0.0
     return assignment, objective, feasible

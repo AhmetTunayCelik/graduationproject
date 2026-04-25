@@ -113,7 +113,7 @@ def run_single_combination(
     if has_orderings:
         start_time = time.time()
         variants = heuristic_module.run_all_orderings(
-            x_star, cost, conflicts, n, E0, lambdas=subg.get("lambdas_final")
+            x_star, cost, conflicts, n, E0
         )
         elapsed = time.time() - start_time
         result_payload["heuristic_output"] = {
