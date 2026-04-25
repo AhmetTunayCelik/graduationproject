@@ -160,65 +160,88 @@ def generate_instance(
         cost_matrix[i][j] = 0
 
     # ------------------------------------------------------------------
-    # Step 4: Determine number of conflicts.
+    # Steps 4 & 5: Sample conflict pairs.
     #
-    # Following the specification provided by the project supervisor:
+    # Strategy depends on graph size:
     #
-    #     |E(C)| = (beta / 2) * |E(G)| * (|E(G)| - 1)
+    # SMALL GRAPH (|E(G)|^2 fits in memory): Build the full valid pool
+    #   upfront — every structurally valid unordered pair (e1, e2) — then
+    #   draw exactly the required number with rng.sample(). This is O(|E|^2)
+    #   to build but completely eliminates rejection-sampling waste, and
+    #   makes beta mathematically exact against the true valid pool.
     #
-    # Here beta is the conflict density (conflict_graph_density) measured
-    # against the pool of unordered pairs of graph edges. Note that this
-    # differs from a simple density * n^2 scaling: it is a true pairwise
-    # density, normalised by the number of potential conflict pairs.
+    # LARGE GRAPH (pool would exceed memory): Fall back to rejection
+    #   sampling with a generous attempt budget. At large n the requested
+    #   beta is tiny (per the tiered design in generate_many_instances.py)
+    #   so the pool hit-rate stays high and rejections remain rare.
+    #
+    # Threshold: |E(G)| <= 1600 means the pool has at most ~1.3M pairs
+    # (~150 MB), which builds quickly. For alpha=1 this covers n <= 40.
     # ------------------------------------------------------------------
+    POOL_EDGE_LIMIT = 1600
+
     num_graph_edges = len(graph_edges)
-    max_conflict_pairs = num_graph_edges * (num_graph_edges - 1) // 2
-    if conflict_graph_density is not None:
-        num_conflicts = max(
-            1, int(round(conflict_graph_density * max_conflict_pairs))
-        )
-        # Guard against requesting more pairs than exist in the pool.
-        num_conflicts = min(num_conflicts, max_conflict_pairs)
 
-    # ------------------------------------------------------------------
-    # Step 5: Sample conflict pairs from graph edges
-    #   Rules:
-    #     - e1 ≠ e2, both in graph_edges
-    #     - different rows AND different columns
-    #     - NOT both in E0  (E0-vs-E0 forbidden)
-    # ------------------------------------------------------------------
-    graph_edges_list = list(graph_edges)
-    conflicts = []
-    conflict_set = set()
-    attempts = 0
-    max_attempts = num_conflicts * 200
-    while len(conflicts) < num_conflicts and attempts < max_attempts:
-        attempts += 1
-        e1 = rng.choice(graph_edges_list)
-        e2 = rng.choice(graph_edges_list)
-        if e1 == e2:
-            continue
-        if e1[0] == e2[0] or e1[1] == e2[1]:
-            continue   # natural assignment conflict
-        if e1 in E0_set and e2 in E0_set:
-            continue   # E0 vs E0 forbidden
-        key = (min(e1, e2), max(e1, e2))
-        if key in conflict_set:
-            continue
-        conflict_set.add(key)
-        conflicts.append([e1[0], e1[1], e2[0], e2[1]])
+    if num_graph_edges <= POOL_EDGE_LIMIT:
+        # ── Direct pool approach ────────────────────────────────────────
+        valid_conflict_pool = []
+        for i in range(num_graph_edges):
+            e1 = graph_edges[i]
+            for j in range(i + 1, num_graph_edges):
+                e2 = graph_edges[j]
+                if e1[0] == e2[0] or e1[1] == e2[1]:
+                    continue      # natural assignment conflict
+                if e1 in E0_set and e2 in E0_set:
+                    continue      # E0 vs E0 forbidden
+                valid_conflict_pool.append([e1[0], e1[1], e2[0], e2[1]])
 
-    if len(conflicts) < num_conflicts:
-        print(f"  [Warning] Only {len(conflicts)} of the requested "
-              f"{num_conflicts} conflicts could be generated.")
+        max_valid_pairs = len(valid_conflict_pool)
+        if conflict_graph_density is not None:
+            num_conflicts = max(1, int(round(conflict_graph_density * max_valid_pairs)))
+            num_conflicts = min(num_conflicts, max_valid_pairs)
 
-    # Back-compute the effective conflict density using the same
-    # pairwise-pool normalisation as the spec. When max_conflict_pairs
-    # is zero (degenerate n <= 1), fall through to zero density.
+        conflicts = rng.sample(valid_conflict_pool, num_conflicts) if (
+            num_conflicts > 0 and max_valid_pairs > 0
+        ) else []
+
+    else:
+        # ── Rejection sampling (large graph) ────────────────────────────
+        # beta is kept small by the tiered design, so the hit-rate is high.
+        max_valid_pairs = num_graph_edges * (num_graph_edges - 1) // 2
+        if conflict_graph_density is not None:
+            num_conflicts = max(1, int(round(conflict_graph_density * max_valid_pairs)))
+            num_conflicts = min(num_conflicts, max_valid_pairs)
+
+        graph_edges_list = graph_edges   # already a list
+        conflicts = []
+        conflict_set: set = set()
+        attempts = 0
+        max_attempts = num_conflicts * 50   # generous but bounded
+        while len(conflicts) < num_conflicts and attempts < max_attempts:
+            attempts += 1
+            e1 = rng.choice(graph_edges_list)
+            e2 = rng.choice(graph_edges_list)
+            if e1 == e2:
+                continue
+            if e1[0] == e2[0] or e1[1] == e2[1]:
+                continue
+            if e1 in E0_set and e2 in E0_set:
+                continue
+            key = (min(e1, e2), max(e1, e2))
+            if key in conflict_set:
+                continue
+            conflict_set.add(key)
+            conflicts.append([e1[0], e1[1], e2[0], e2[1]])
+
+        if len(conflicts) < num_conflicts:
+            print(f"  [Warning] Only {len(conflicts)} of {num_conflicts} "
+                  f"conflicts generated (attempt budget exhausted).")
+
+    # Back-compute effective density against the valid pool.
     if conflict_graph_density is not None:
         eff_conflict_density = conflict_graph_density
-    elif max_conflict_pairs > 0:
-        eff_conflict_density = len(conflicts) / max_conflict_pairs
+    elif max_valid_pairs > 0:
+        eff_conflict_density = len(conflicts) / max_valid_pairs
     else:
         eff_conflict_density = 0.0
 
