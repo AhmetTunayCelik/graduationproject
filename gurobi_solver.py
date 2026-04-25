@@ -113,15 +113,19 @@ def solve_instance(
             "gap": 0.0,
         }
     elif status == GRB.TIME_LIMIT:
-        obj_val = model.ObjVal if model.ObjVal is not None else None
-        assignment = None
-        if obj_val is not None:
+        if model.SolCount > 0:
             assignment = [(i, j) for i in range(n) for j in range(n) if x[i, j].X > 0.5]
             assignment.sort(key=lambda e: e[0])
-        gap = model.MIPGap if hasattr(model, "MIPGap") else None
+            obj_val = model.ObjVal
+            gap = model.MIPGap if hasattr(model, "MIPGap") else None
+        else:
+            # Timed out before finding any feasible solution.
+            assignment = []
+            obj_val = 0.0
+            gap = float("inf")
         return {
             "status": "TIME_LIMIT",
-            "objective": float(obj_val) if obj_val is not None else None,
+            "objective": float(obj_val),
             "assignment": assignment,
             "runtime": runtime,
             "gap": gap,
