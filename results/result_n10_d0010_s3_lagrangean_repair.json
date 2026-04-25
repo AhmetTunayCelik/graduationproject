@@ -1,0 +1,217 @@
+{
+  "n": 10,
+  "seed": 3,
+  "num_conflicts": 4,
+  "E0_objective": 0,
+  "heuristic": "lagrangean_repair",
+  "subgradient_LB": 837.0,
+  "subgradient_UB": 837.0,
+  "subgradient_iterations": 1,
+  "subgradient_runtime": 4.935264587402344e-05,
+  "heuristic_name": "lagrangean_repair",
+  "heuristic_output": {
+    "ordering_variants": {
+      "dec_weight": {
+        "ordering": "dec_weight",
+        "ordering_label": "Decreasing weight",
+        "objective": 0.0,
+        "feasible": true,
+        "runtime_seconds": 5.888938903808594e-05,
+        "core_size": 10,
+        "assignment": [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            5
+          ],
+          [
+            2,
+            6
+          ],
+          [
+            3,
+            0
+          ],
+          [
+            4,
+            9
+          ],
+          [
+            5,
+            4
+          ],
+          [
+            6,
+            7
+          ],
+          [
+            7,
+            2
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            9,
+            3
+          ]
+        ]
+      },
+      "inc_weight": {
+        "ordering": "inc_weight",
+        "ordering_label": "Increasing weight",
+        "objective": 0.0,
+        "feasible": true,
+        "runtime_seconds": 3.361701965332031e-05,
+        "core_size": 10,
+        "assignment": [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            5
+          ],
+          [
+            2,
+            6
+          ],
+          [
+            3,
+            0
+          ],
+          [
+            4,
+            9
+          ],
+          [
+            5,
+            4
+          ],
+          [
+            6,
+            7
+          ],
+          [
+            7,
+            2
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            9,
+            3
+          ]
+        ]
+      },
+      "inc_degree": {
+        "ordering": "inc_degree",
+        "ordering_label": "Increasing conflict degree",
+        "objective": 0.0,
+        "feasible": true,
+        "runtime_seconds": 3.0279159545898438e-05,
+        "core_size": 10,
+        "assignment": [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            5
+          ],
+          [
+            2,
+            6
+          ],
+          [
+            3,
+            0
+          ],
+          [
+            4,
+            9
+          ],
+          [
+            5,
+            4
+          ],
+          [
+            6,
+            7
+          ],
+          [
+            7,
+            2
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            9,
+            3
+          ]
+        ]
+      },
+      "weight_over_degree": {
+        "ordering": "weight_over_degree",
+        "ordering_label": "Weight-over-degree ratio",
+        "objective": 0.0,
+        "feasible": true,
+        "runtime_seconds": 2.8371810913085938e-05,
+        "core_size": 10,
+        "assignment": [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            5
+          ],
+          [
+            2,
+            6
+          ],
+          [
+            3,
+            0
+          ],
+          [
+            4,
+            9
+          ],
+          [
+            5,
+            4
+          ],
+          [
+            6,
+            7
+          ],
+          [
+            7,
+            2
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            9,
+            3
+          ]
+        ]
+      }
+    },
+    "runtime_seconds": 0.0002224445343017578
+  }
+}
