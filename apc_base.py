@@ -396,7 +396,7 @@ def subgradient_solve(
 
         # Subgradient direction and multiplier update
         if num_conflicts > 0:
-            s = 1.0 - asgn_flat[c_e1_flat].astype(float) - asgn_flat[c_e2_flat].astype(float)
+            s = asgn_flat[c_e1_flat].astype(float) + asgn_flat[c_e2_flat].astype(float) - 1.0
             s_norm_sq = float(np.dot(s, s))
             if s_norm_sq < epsilon:
                 if verbose:
