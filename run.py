@@ -13,6 +13,7 @@ import time
 
 import apc_base as ab
 from batch_experiment import discover_heuristics
+from parameters import config
 
 
 def main():
@@ -49,7 +50,7 @@ def main():
         subg = ab.subgradient_solve(
             instance,
             repair_fn=default_repair.run,
-            K_max=min(500, max(100, 1000 // instance["n"])),
+            K_max=config.SUBG_MAX_ITERS,
             verbose=not args.quiet,
         )
         ab.save_subgradient_result(instance, subg, args.result_dir)

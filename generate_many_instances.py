@@ -26,32 +26,33 @@ Total: 220 instances
 """
 
 from instance_generator import generate_batch
+from parameters import config
 
 if __name__ == "__main__":
 
-    # Small instances — wide beta range, more seeds
+    # Small instances
     generate_batch(
-        n_values=[10, 20],
-        conflict_graph_densities=[0.001, 0.005, 0.010, 0.020, 0.050],
-        seeds=list(range(1, 11)),
-        directory="instances",
+        n_values=config.STD_SMALL_N,
+        conflict_graph_densities=config.STD_SMALL_BETAS,
+        seeds=config.STD_SMALL_SEEDS,
+        directory=config.INSTANCE_DIR,
         force=False,
     )
 
-    # Medium instances — narrower beta range, fewer seeds
+    # Medium instances
     generate_batch(
-        n_values=[30, 50],
-        conflict_graph_densities=[0.0002, 0.0005, 0.001, 0.003, 0.008],
-        seeds=list(range(1, 8)),
-        directory="instances",
+        n_values=config.STD_MED_N,
+        conflict_graph_densities=config.STD_MED_BETAS,
+        seeds=config.STD_MED_SEEDS,
+        directory=config.INSTANCE_DIR,
         force=False,
     )
 
-    # Large instances — tight beta range, fewest seeds
+    # Large instances
     generate_batch(
-        n_values=[75, 100],
-        conflict_graph_densities=[0.00005, 0.0001, 0.00015, 0.0002, 0.0003],
-        seeds=list(range(1, 6)),
-        directory="instances",
+        n_values=config.STD_LARGE_N,
+        conflict_graph_densities=config.STD_LARGE_BETAS,
+        seeds=config.STD_LARGE_SEEDS,
+        directory=config.INSTANCE_DIR,
         force=False,
     )

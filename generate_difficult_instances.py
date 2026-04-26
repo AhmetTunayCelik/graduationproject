@@ -1,5 +1,5 @@
 """
-generate_many_instances.py
+generate_difficult_instances.py
 ===========================
 
 Generate a balanced set of MAX-APC instances designed specifically to 
@@ -11,6 +11,7 @@ import os
 import itertools
 from instance_generator import generate_instance
 import apc_base as ab
+from parameters import config
 
 def build_custom_batch(n_values, betas, seeds, cost_low, cost_high, directory="instances"):
     os.makedirs(directory, exist_ok=True)
@@ -45,10 +46,12 @@ if __name__ == "__main__":
     # density where the Branch & Bound tree explodes.
     # ---------------------------------------------------------
     build_custom_batch(
-        n_values=[40, 50],
-        betas=[0.01, 0.03, 0.05, 0.08, 0.12, 0.15], # Pushing beta much higher
-        seeds=list(range(1, 6)),
-        cost_low=1, cost_high=100
+        n_values=config.DIFF_GOLDILOCKS_N,
+        betas=config.DIFF_GOLDILOCKS_BETAS, # Pushing beta much higher
+        seeds=config.DIFF_GOLDILOCKS_SEEDS,
+        cost_low=config.DEFAULT_COST_LOW, 
+        cost_high=config.DEFAULT_COST_HIGH,
+        directory=config.INSTANCE_DIR
     )
 
     # ---------------------------------------------------------
@@ -57,10 +60,12 @@ if __name__ == "__main__":
     # because thousands of nodes will have nearly identical bounds.
     # ---------------------------------------------------------
     build_custom_batch(
-        n_values=[30, 40, 50],
-        betas=[0.005, 0.01, 0.02, 0.05],
-        seeds=list(range(1, 6)),
-        cost_low=95, cost_high=100  # High degeneracy!
+        n_values=config.DIFF_DEGEN_N,
+        betas=config.DIFF_DEGEN_BETAS,
+        seeds=config.DIFF_DEGEN_SEEDS,
+        cost_low=config.DIFF_DEGEN_COST_LOW, 
+        cost_high=config.DIFF_DEGEN_COST_HIGH,  # High degeneracy!
+        directory=config.INSTANCE_DIR
     )
 
     # ---------------------------------------------------------
@@ -69,10 +74,12 @@ if __name__ == "__main__":
     # keep the number of conflicts manageable in memory.
     # ---------------------------------------------------------
     build_custom_batch(
-        n_values=[100, 150, 200],
-        betas=[0.00005, 0.0001, 0.0002],
-        seeds=list(range(1, 4)), # Only 3 seeds per config, these take space
-        cost_low=1, cost_high=100
+        n_values=config.DIFF_EXTREME_N,
+        betas=config.DIFF_EXTREME_BETAS,
+        seeds=config.DIFF_EXTREME_SEEDS, # Only 3 seeds per config, these take space
+        cost_low=config.DEFAULT_COST_LOW, 
+        cost_high=config.DEFAULT_COST_HIGH,
+        directory=config.INSTANCE_DIR
     )
 
     print("\nBatch generation complete!")

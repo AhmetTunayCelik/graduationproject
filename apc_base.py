@@ -32,6 +32,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment
+from parameters import config
 
 # -----------------------------------------------------------------------------
 # Type aliases
@@ -254,8 +255,8 @@ def _jsonify(obj: Any) -> Any:
 def subgradient_solve(
     instance: Instance,
     repair_fn: Optional[RepairFn] = None,
-    K_max: int = 500,
-    epsilon: float = 1e-6,
+    K_max: int = config.SUBG_MAX_ITERS,
+    epsilon: float = config.SUBG_EPSILON,
     verbose: bool = True,
 ) -> Dict[str, Any]:
     """Solve the Lagrangean dual of a MAX-APC instance by subgradient ascent.
@@ -388,8 +389,8 @@ def subgradient_solve(
             else:
                 t_no_improve += 1
 
-        # Halve step length after 20 stagnant iterations
-        if t_no_improve >= 20:
+        # Halve step length after stagnant iterations
+        if t_no_improve >= config.SUBG_STAGNATION_LIMIT:
             t_no_improve = 0
             pi_k /= 2.0
 

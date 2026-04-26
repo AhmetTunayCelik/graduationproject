@@ -15,6 +15,7 @@ import time
 from typing import Dict, List, Optional, Tuple
 
 import apc_base as ab
+from parameters import config
 
 
 # -----------------------------------------------------------------------------
@@ -90,7 +91,7 @@ def run_single_combination(
         subg = ab.subgradient_solve(
             instance,
             repair_fn=repair_fn,
-            K_max=min(500, max(100, 1000 // instance["n"])),
+            K_max=config.SUBG_MAX_ITERS,
             verbose=False,
         )
         ab.save_subgradient_result(instance, subg, directory=subgradient_cache_dir)
