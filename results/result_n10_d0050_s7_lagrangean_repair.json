@@ -7,7 +7,7 @@
   "subgradient_LB": 872.0,
   "subgradient_UB": 872.0,
   "subgradient_iterations": 1,
-  "subgradient_runtime": 0.00011968612670898438,
+  "subgradient_runtime": 6.389617919921875e-05,
   "heuristic_name": "lagrangean_repair",
   "heuristic_output": {
     "ordering_variants": {
@@ -16,7 +16,7 @@
         "ordering_label": "Decreasing weight",
         "objective": 0.0,
         "feasible": true,
-        "runtime_seconds": 0.00011754035949707031,
+        "runtime_seconds": 8.416175842285156e-05,
         "core_size": 10,
         "assignment": [
           [
@@ -66,7 +66,7 @@
         "ordering_label": "Increasing weight",
         "objective": 0.0,
         "feasible": true,
-        "runtime_seconds": 0.0001068115234375,
+        "runtime_seconds": 4.792213439941406e-05,
         "core_size": 10,
         "assignment": [
           [
@@ -116,7 +116,7 @@
         "ordering_label": "Increasing conflict degree",
         "objective": 0.0,
         "feasible": true,
-        "runtime_seconds": 6.222724914550781e-05,
+        "runtime_seconds": 3.886222839355469e-05,
         "core_size": 10,
         "assignment": [
           [
@@ -166,7 +166,7 @@
         "ordering_label": "Weight-over-degree ratio",
         "objective": 0.0,
         "feasible": true,
-        "runtime_seconds": 5.817413330078125e-05,
+        "runtime_seconds": 3.62396240234375e-05,
         "core_size": 10,
         "assignment": [
           [
@@ -212,6 +212,6 @@
         ]
       }
     },
-    "runtime_seconds": 0.0004725456237792969
+    "runtime_seconds": 0.0003044605255126953
   }
 }

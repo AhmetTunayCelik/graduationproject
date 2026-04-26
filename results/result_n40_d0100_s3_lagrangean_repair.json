@@ -4,10 +4,10 @@
   "num_conflicts": 12160,
   "E0_objective": 0,
   "heuristic": "lagrangean_repair",
-  "subgradient_LB": 0.0,
-  "subgradient_UB": 1.4223666958657607e+25,
-  "subgradient_iterations": 100,
-  "subgradient_runtime": 0.8478686809539795,
+  "subgradient_LB": 3720.0,
+  "subgradient_UB": 3861.765802127615,
+  "subgradient_iterations": 500,
+  "subgradient_runtime": 5.2931177616119385,
   "heuristic_name": "lagrangean_repair",
   "heuristic_output": {
     "ordering_variants": {
@@ -16,7 +16,7 @@
         "ordering_label": "Decreasing weight",
         "objective": 0.0,
         "feasible": true,
-        "runtime_seconds": 0.01297903060913086,
+        "runtime_seconds": 0.008138656616210938,
         "core_size": 37,
         "assignment": [
           [
@@ -186,7 +186,7 @@
         "ordering_label": "Increasing weight",
         "objective": 0.0,
         "feasible": true,
-        "runtime_seconds": 0.008048295974731445,
+        "runtime_seconds": 0.0073125362396240234,
         "core_size": 37,
         "assignment": [
           [
@@ -356,7 +356,7 @@
         "ordering_label": "Increasing conflict degree",
         "objective": 0.0,
         "feasible": true,
-        "runtime_seconds": 0.006999492645263672,
+        "runtime_seconds": 0.0072174072265625,
         "core_size": 37,
         "assignment": [
           [
@@ -526,7 +526,7 @@
         "ordering_label": "Weight-over-degree ratio",
         "objective": 0.0,
         "feasible": true,
-        "runtime_seconds": 0.006251335144042969,
+        "runtime_seconds": 0.006832599639892578,
         "core_size": 37,
         "assignment": [
           [
@@ -692,6 +692,6 @@
         ]
       }
     },
-    "runtime_seconds": 0.04022789001464844
+    "runtime_seconds": 0.03691434860229492
   }
 }
