@@ -1,0 +1,377 @@
+{
+  "n": 20,
+  "seed": 4,
+  "num_conflicts": 3600,
+  "E0_objective": 0,
+  "heuristic": "lagrangean_repair",
+  "subgradient_LB": 1638.0,
+  "subgradient_UB": 1829.914992914289,
+  "subgradient_iterations": 500,
+  "subgradient_runtime": 0.8408083915710449,
+  "heuristic_name": "lagrangean_repair",
+  "heuristic_output": {
+    "ordering_variants": {
+      "dec_weight": {
+        "ordering": "dec_weight",
+        "ordering_label": "Decreasing weight",
+        "objective": 0.0,
+        "feasible": true,
+        "runtime_seconds": 0.0013647079467773438,
+        "core_size": 16,
+        "assignment": [
+          [
+            0,
+            17
+          ],
+          [
+            1,
+            19
+          ],
+          [
+            2,
+            10
+          ],
+          [
+            3,
+            14
+          ],
+          [
+            4,
+            5
+          ],
+          [
+            5,
+            18
+          ],
+          [
+            6,
+            16
+          ],
+          [
+            7,
+            11
+          ],
+          [
+            8,
+            4
+          ],
+          [
+            9,
+            8
+          ],
+          [
+            10,
+            6
+          ],
+          [
+            11,
+            0
+          ],
+          [
+            12,
+            13
+          ],
+          [
+            13,
+            1
+          ],
+          [
+            14,
+            2
+          ],
+          [
+            15,
+            15
+          ],
+          [
+            16,
+            12
+          ],
+          [
+            17,
+            3
+          ],
+          [
+            18,
+            9
+          ],
+          [
+            19,
+            7
+          ]
+        ]
+      },
+      "inc_weight": {
+        "ordering": "inc_weight",
+        "ordering_label": "Increasing weight",
+        "objective": 0.0,
+        "feasible": true,
+        "runtime_seconds": 0.001855611801147461,
+        "core_size": 15,
+        "assignment": [
+          [
+            0,
+            17
+          ],
+          [
+            1,
+            19
+          ],
+          [
+            2,
+            10
+          ],
+          [
+            3,
+            14
+          ],
+          [
+            4,
+            5
+          ],
+          [
+            5,
+            18
+          ],
+          [
+            6,
+            16
+          ],
+          [
+            7,
+            11
+          ],
+          [
+            8,
+            4
+          ],
+          [
+            9,
+            8
+          ],
+          [
+            10,
+            6
+          ],
+          [
+            11,
+            0
+          ],
+          [
+            12,
+            13
+          ],
+          [
+            13,
+            1
+          ],
+          [
+            14,
+            2
+          ],
+          [
+            15,
+            15
+          ],
+          [
+            16,
+            12
+          ],
+          [
+            17,
+            3
+          ],
+          [
+            18,
+            9
+          ],
+          [
+            19,
+            7
+          ]
+        ]
+      },
+      "inc_degree": {
+        "ordering": "inc_degree",
+        "ordering_label": "Increasing conflict degree",
+        "objective": 0.0,
+        "feasible": true,
+        "runtime_seconds": 0.0021321773529052734,
+        "core_size": 16,
+        "assignment": [
+          [
+            0,
+            17
+          ],
+          [
+            1,
+            19
+          ],
+          [
+            2,
+            10
+          ],
+          [
+            3,
+            14
+          ],
+          [
+            4,
+            5
+          ],
+          [
+            5,
+            18
+          ],
+          [
+            6,
+            16
+          ],
+          [
+            7,
+            11
+          ],
+          [
+            8,
+            4
+          ],
+          [
+            9,
+            8
+          ],
+          [
+            10,
+            6
+          ],
+          [
+            11,
+            0
+          ],
+          [
+            12,
+            13
+          ],
+          [
+            13,
+            1
+          ],
+          [
+            14,
+            2
+          ],
+          [
+            15,
+            15
+          ],
+          [
+            16,
+            12
+          ],
+          [
+            17,
+            3
+          ],
+          [
+            18,
+            9
+          ],
+          [
+            19,
+            7
+          ]
+        ]
+      },
+      "weight_over_degree": {
+        "ordering": "weight_over_degree",
+        "ordering_label": "Weight-over-degree ratio",
+        "objective": 0.0,
+        "feasible": true,
+        "runtime_seconds": 0.0016927719116210938,
+        "core_size": 16,
+        "assignment": [
+          [
+            0,
+            17
+          ],
+          [
+            1,
+            19
+          ],
+          [
+            2,
+            10
+          ],
+          [
+            3,
+            14
+          ],
+          [
+            4,
+            5
+          ],
+          [
+            5,
+            18
+          ],
+          [
+            6,
+            16
+          ],
+          [
+            7,
+            11
+          ],
+          [
+            8,
+            4
+          ],
+          [
+            9,
+            8
+          ],
+          [
+            10,
+            6
+          ],
+          [
+            11,
+            0
+          ],
+          [
+            12,
+            13
+          ],
+          [
+            13,
+            1
+          ],
+          [
+            14,
+            2
+          ],
+          [
+            15,
+            15
+          ],
+          [
+            16,
+            12
+          ],
+          [
+            17,
+            3
+          ],
+          [
+            18,
+            9
+          ],
+          [
+            19,
+            7
+          ]
+        ]
+      }
+    },
+    "runtime_seconds": 0.008153915405273438
+  }
+}
