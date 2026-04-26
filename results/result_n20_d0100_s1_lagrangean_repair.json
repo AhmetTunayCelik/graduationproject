@@ -4,10 +4,10 @@
   "num_conflicts": 720,
   "E0_objective": 0,
   "heuristic": "lagrangean_repair",
-  "subgradient_LB": 0.0,
-  "subgradient_UB": 5.708901297263009e+24,
-  "subgradient_iterations": 100,
-  "subgradient_runtime": 0.04842376708984375,
+  "subgradient_LB": 1807.0,
+  "subgradient_UB": 1818.5005563477564,
+  "subgradient_iterations": 500,
+  "subgradient_runtime": 0.01967620849609375,
   "heuristic_name": "lagrangean_repair",
   "heuristic_output": {
     "ordering_variants": {
@@ -16,8 +16,8 @@
         "ordering_label": "Decreasing weight",
         "objective": 0.0,
         "feasible": true,
-        "runtime_seconds": 0.0009925365447998047,
-        "core_size": 18,
+        "runtime_seconds": 0.0005733966827392578,
+        "core_size": 20,
         "assignment": [
           [
             0,
@@ -104,90 +104,90 @@
       "inc_weight": {
         "ordering": "inc_weight",
         "ordering_label": "Increasing weight",
-        "objective": 1690.0,
+        "objective": 0.0,
         "feasible": true,
-        "runtime_seconds": 0.0004374980926513672,
-        "core_size": 17,
+        "runtime_seconds": 0.0004115104675292969,
+        "core_size": 20,
         "assignment": [
           [
             0,
-            17
-          ],
-          [
-            1,
-            7
-          ],
-          [
-            2,
-            19
-          ],
-          [
-            3,
-            6
-          ],
-          [
-            4,
-            14
-          ],
-          [
-            5,
-            8
-          ],
-          [
-            6,
-            18
-          ],
-          [
-            7,
-            5
-          ],
-          [
-            8,
-            4
-          ],
-          [
-            9,
-            16
-          ],
-          [
-            10,
-            3
-          ],
-          [
-            11,
-            10
-          ],
-          [
-            12,
-            12
-          ],
-          [
-            13,
-            15
-          ],
-          [
-            14,
-            13
-          ],
-          [
-            15,
-            1
-          ],
-          [
-            16,
-            0
-          ],
-          [
-            17,
             11
           ],
           [
-            18,
+            1,
+            5
+          ],
+          [
+            2,
+            17
+          ],
+          [
+            3,
+            19
+          ],
+          [
+            4,
             9
           ],
           [
-            19,
+            5,
+            0
+          ],
+          [
+            6,
+            16
+          ],
+          [
+            7,
+            1
+          ],
+          [
+            8,
+            15
+          ],
+          [
+            9,
+            6
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            11,
+            13
+          ],
+          [
+            12,
+            14
+          ],
+          [
+            13,
+            12
+          ],
+          [
+            14,
+            7
+          ],
+          [
+            15,
+            3
+          ],
+          [
+            16,
+            8
+          ],
+          [
+            17,
             2
+          ],
+          [
+            18,
+            18
+          ],
+          [
+            19,
+            4
           ]
         ]
       },
@@ -196,8 +196,8 @@
         "ordering_label": "Increasing conflict degree",
         "objective": 0.0,
         "feasible": true,
-        "runtime_seconds": 0.0004177093505859375,
-        "core_size": 18,
+        "runtime_seconds": 0.0003917217254638672,
+        "core_size": 20,
         "assignment": [
           [
             0,
@@ -286,8 +286,8 @@
         "ordering_label": "Weight-over-degree ratio",
         "objective": 0.0,
         "feasible": true,
-        "runtime_seconds": 0.0004086494445800781,
-        "core_size": 18,
+        "runtime_seconds": 0.00038170814514160156,
+        "core_size": 20,
         "assignment": [
           [
             0,
@@ -372,6 +372,6 @@
         ]
       }
     },
-    "runtime_seconds": 0.0028710365295410156
+    "runtime_seconds": 0.0023050308227539062
   }
 }

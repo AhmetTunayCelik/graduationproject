@@ -4,10 +4,10 @@
   "num_conflicts": 3024,
   "E0_objective": 0,
   "heuristic": "lagrangean_repair",
-  "subgradient_LB": 0.0,
-  "subgradient_UB": 1.0355943631963594e+25,
-  "subgradient_iterations": 100,
-  "subgradient_runtime": 0.2296907901763916,
+  "subgradient_LB": 2863.0,
+  "subgradient_UB": 2863.994323998619,
+  "subgradient_iterations": 500,
+  "subgradient_runtime": 0.06677746772766113,
   "heuristic_name": "lagrangean_repair",
   "heuristic_output": {
     "ordering_variants": {
@@ -16,8 +16,8 @@
         "ordering_label": "Decreasing weight",
         "objective": 0.0,
         "feasible": true,
-        "runtime_seconds": 0.0022127628326416016,
-        "core_size": 29,
+        "runtime_seconds": 0.0018591880798339844,
+        "core_size": 30,
         "assignment": [
           [
             0,
@@ -144,86 +144,86 @@
       "inc_weight": {
         "ordering": "inc_weight",
         "ordering_label": "Increasing weight",
-        "objective": 2767.0,
+        "objective": 0.0,
         "feasible": true,
-        "runtime_seconds": 0.0017821788787841797,
-        "core_size": 28,
+        "runtime_seconds": 0.001636505126953125,
+        "core_size": 30,
         "assignment": [
           [
             0,
-            10
-          ],
-          [
-            1,
-            12
-          ],
-          [
-            2,
-            26
-          ],
-          [
-            3,
             3
           ],
           [
-            4,
-            15
-          ],
-          [
-            5,
-            4
-          ],
-          [
-            6,
-            1
-          ],
-          [
-            7,
-            25
-          ],
-          [
-            8,
-            8
-          ],
-          [
-            9,
-            28
-          ],
-          [
-            10,
-            27
-          ],
-          [
-            11,
-            29
-          ],
-          [
-            12,
-            5
-          ],
-          [
-            13,
-            17
-          ],
-          [
-            14,
-            21
-          ],
-          [
-            15,
-            18
-          ],
-          [
-            16,
-            13
-          ],
-          [
-            17,
+            1,
             22
           ],
           [
-            18,
+            2,
+            17
+          ],
+          [
+            3,
+            15
+          ],
+          [
+            4,
             0
+          ],
+          [
+            5,
+            25
+          ],
+          [
+            6,
+            4
+          ],
+          [
+            7,
+            7
+          ],
+          [
+            8,
+            14
+          ],
+          [
+            9,
+            16
+          ],
+          [
+            10,
+            20
+          ],
+          [
+            11,
+            24
+          ],
+          [
+            12,
+            12
+          ],
+          [
+            13,
+            18
+          ],
+          [
+            14,
+            10
+          ],
+          [
+            15,
+            13
+          ],
+          [
+            16,
+            23
+          ],
+          [
+            17,
+            28
+          ],
+          [
+            18,
+            6
           ],
           [
             19,
@@ -231,43 +231,43 @@
           ],
           [
             20,
-            9
+            8
           ],
           [
             21,
-            11
+            9
           ],
           [
             22,
-            20
+            21
           ],
           [
             23,
-            24
+            5
           ],
           [
             24,
-            16
+            11
           ],
           [
             25,
-            2
+            26
           ],
           [
             26,
-            23
+            2
           ],
           [
             27,
-            7
+            1
           ],
           [
             28,
-            6
+            29
           ],
           [
             29,
-            14
+            27
           ]
         ]
       },
@@ -276,8 +276,8 @@
         "ordering_label": "Increasing conflict degree",
         "objective": 0.0,
         "feasible": true,
-        "runtime_seconds": 0.001764535903930664,
-        "core_size": 29,
+        "runtime_seconds": 0.0016107559204101562,
+        "core_size": 30,
         "assignment": [
           [
             0,
@@ -406,8 +406,8 @@
         "ordering_label": "Weight-over-degree ratio",
         "objective": 0.0,
         "feasible": true,
-        "runtime_seconds": 0.0019283294677734375,
-        "core_size": 29,
+        "runtime_seconds": 0.0017006397247314453,
+        "core_size": 30,
         "assignment": [
           [
             0,
@@ -532,6 +532,6 @@
         ]
       }
     },
-    "runtime_seconds": 0.009566545486450195
+    "runtime_seconds": 0.008249044418334961
   }
 }

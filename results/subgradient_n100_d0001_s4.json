@@ -5809,6 +5809,6 @@
     0.0,
     0.0
   ],
-  "runtime_seconds": 0.0005741119384765625,
+  "runtime_seconds": 0.00033783912658691406,
   "terminated_reason": "complementary_slackness"
 }
