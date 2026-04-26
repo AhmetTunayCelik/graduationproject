@@ -96,7 +96,7 @@ def run_single_combination(
         )
         ab.save_subgradient_result(instance, subg, directory=subgradient_cache_dir)
 
-    x_star = subg["x_star_final"]
+    x_star = subg.get("x_star_final") or subg["incumbent_assignment"]
     cost = instance["cost_matrix"]
     conflicts = instance["conflicts"]
     n = instance["n"]
@@ -126,7 +126,7 @@ def run_single_combination(
         start_time = time.time()
         try:
             assignment, objective, feasible = heuristic_run(
-                x_star, cost, conflicts, n, E0, lambdas=subg.get("lambdas_final")
+                x_star, cost, conflicts, n, E0, lambdas=subg.get("lambdas_final") or subg.get("lambdas_sparse")
             )
         except TypeError:
             assignment, objective, feasible = heuristic_run(x_star, cost, conflicts, n)
@@ -138,7 +138,8 @@ def run_single_combination(
             "runtime_seconds": elapsed,
         }
 
-    ab.save_result(instance, heuristic_name, result_payload, directory=result_dir)
+    ab.save_result(instance, heuristic_name, result_payload, directory=result_dir, subgradient_output=subg)
+
     return True
 
 

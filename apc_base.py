@@ -184,21 +184,61 @@ def save_result(
     heuristic_name: str,
     result: Dict[str, Any],
     directory: str = "results",
+    subgradient_output: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Persist a single heuristic's result on an instance.
 
     The result dict may contain any JSON‑serialisable data. It is enriched
     with instance identifiers (n, seed, num_conflicts, E0_objective) and the
     heuristic name for easy tabular loading.
+
+    If *subgradient_output* is provided (the dict returned by
+    subgradient_solve()), the best incumbent found during the subgradient
+    loop (``x_LB`` / ``LB``) is written as the top-level
+    ``incumbent_objective`` and ``incumbent_assignment`` fields so that the
+    result file always reports the true best feasible solution, not merely
+    the last repair attempt.
     """
     os.makedirs(directory, exist_ok=True)
     fpath = os.path.join(directory, _result_filename(instance, heuristic_name))
+
+    # Best feasible solution from the subgradient loop (x_LB) takes priority.
+    # If subgradient_output is not supplied we fall back to the best feasible
+    # variant found among the heuristic's own ordering results.
+    if subgradient_output is not None:
+        # "LB" exists in live subgradient_solve() output and new-format cache.
+        # "subgradient_LB" is the key batch_experiment uses in result_payload.
+        incumbent_obj = float(
+            subgradient_output.get("LB")
+            or subgradient_output.get("subgradient_LB")
+            or 0.0
+        )
+        raw_asgn = (
+            subgradient_output.get("x_LB")
+            or subgradient_output.get("incumbent_assignment")
+        )
+        incumbent_asgn = _jsonify(raw_asgn) if raw_asgn else None
+    else:
+        # Fallback: scan heuristic_output for best feasible ordering
+        ordering_variants = (
+            result.get("heuristic_output", {}).get("ordering_variants", {})
+        )
+        best_obj, best_asgn = None, None
+        for rec in ordering_variants.values():
+            if rec.get("feasible") and (best_obj is None or rec["objective"] > best_obj):
+                best_obj = rec["objective"]
+                best_asgn = rec["assignment"]
+        incumbent_obj = best_obj
+        incumbent_asgn = best_asgn
+
     payload = {
         "n": instance["n"],
         "seed": instance["seed"],
         "num_conflicts": len(instance["conflicts"]),
         "E0_objective": sum(instance["cost_matrix"][i][j] for i, j in instance["E0"]),
         "heuristic": heuristic_name,
+        "incumbent_objective": incumbent_obj,
+        "incumbent_assignment": incumbent_asgn,
         **_jsonify(result),
     }
     with open(fpath, "w") as f:
@@ -213,13 +253,39 @@ def save_subgradient_result(
 ) -> str:
     """Cache the output of subgradient_solve() for reuse by multiple heuristics.
 
-    The output dict must contain at least the fields that subsequent
-    heuristics need: 'x_star_final', 'LB', 'UB', 'gap_pct', 'iterations',
-    'lambdas_final', 'terminated_reason', 'runtime_seconds'.
+    Stored fields
+    -------------
+    LB, UB, gap_pct            — final bound quality metrics
+    incumbent_assignment        — assignment that achieved LB (x_LB)
+    iterations, runtime_seconds, terminated_reason
+    lambdas_sparse             — {index: value} dict of non-zero multipliers only
+                                 (saves space; reconstruct full vector via
+                                  np.zeros(n_conflicts) then assign by index)
+
+    Omitted: x_star_final (last subproblem solution, not a primal feasible
+    solution and not needed by downstream heuristics), full lambdas array.
     """
     os.makedirs(directory, exist_ok=True)
     fpath = os.path.join(directory, _subgradient_filename(instance))
-    payload = _jsonify(subgradient_output)
+
+    lambdas = subgradient_output.get("lambdas_final", [])
+    lambdas_sparse = {
+        str(i): float(v)
+        for i, v in enumerate(lambdas)
+        if v > 1e-12
+    }
+
+    payload = {
+        "LB":                   float(subgradient_output["LB"]),
+        "UB":                   float(subgradient_output["UB"]),
+        "gap_pct":              float(subgradient_output["gap_pct"]),
+        "incumbent_assignment": _jsonify(subgradient_output["x_LB"]),
+        "iterations":           int(subgradient_output["iterations"]),
+        "lambdas_sparse":       lambdas_sparse,
+        "num_lambdas":          len(lambdas),
+        "runtime_seconds":      float(subgradient_output["runtime_seconds"]),
+        "terminated_reason":    subgradient_output["terminated_reason"],
+    }
     with open(fpath, "w") as f:
         json.dump(payload, f, indent=2)
     return fpath
