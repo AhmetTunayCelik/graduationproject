@@ -1,0 +1,16 @@
+Neden Best UB Değil de Current UB Kullanıyoruz? 
+
+Best UB nispeten smooth (artmayan), Curent UB ise Testere dişi tipi UB azalışı sağlıyor (dalgalı).
+
+Subgradient algoritmasında adım boyu formülü için Best UB yani en iyi üst sınır kullanmak, 
+kağıt üzerinde stabilite vaat etse de MAX-APC gibi yüksek çatışmalı problemlerde risklidir. 
+Best UB değerini sabitlemek, adım boyu payını yani UB eksi LB farkını aşılamaz bir tavanla kilitler. 
+Multiplier yani lambda değerleri yanlış bölgeye saptığında pay yapay olarak küçük kalır, adım boyu 
+erkenden daralır ve algoritma dual uzayda yeni bölgeleri keşfedecek enerjiyi bulamaz. (Local minimuma saplanma riski)
+Diğer bir deyişle algoritmanın "stuck" (çakılı) kalmasına ve dual uzayda daha iyi multipliers bulmak için gereken "sıçramayı" yapamamasına neden olur.
+Bu durum, yerel minimumlara saplanmaya ve repair fonksiyonuna sürekli birbirinin aynısı olan girdilerin girmesine neden olarak LB gelişimini durdurur (güncellenmez).
+
+Current UB yani Z_Lag kullanmak ise algoritmaya esneklik kazandırır. Hata payı arttığında Z_Lag anında yükselir ve pay büyür.
+Bu artış, adım boyunu otomatik büyüterek algoritmanın hatalı bölgeden büyük bir sıçrama ile kaçmasını sağlar. 
+Özetle; istikrar yerine dinamikliği seçmek, algoritmanın donmasını engeller, her iterasyonda en güncel çatışma bilgisini kullanarak
+daha geniş bir arama uzayını taramamıza olanak tanır. (Local minimuma saplanma riski yok denecek kadar az.)
