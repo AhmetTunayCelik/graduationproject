@@ -19,8 +19,10 @@ Key design decisions (as per project supervisor's pseudocode)
    step‑size numerator (not the best seen so far), and UB is unconditionally
    set to Z_Lag every iteration (no running minimum).
 4. Step length is halved after 20 stagnant iterations (no LB improvement).
-5. All persistent artefacts (instances, subgradient caches, heuristic results)
-   are stored as JSON with a stable schema for downstream analysis.
+5. All persistent artefacts (instances, heuristic results) are stored as JSON
+   with a stable schema for downstream analysis. The subgradient loop is
+   recomputed in memory for every heuristic evaluation (no cache) so that
+   each heuristic pays the full CPU cost of its own dual ascent.
 """
 
 from __future__ import annotations
@@ -105,47 +107,54 @@ def find_violations(
 # -----------------------------------------------------------------------------
 # Storage (instances, heuristic results, subgradient cache)
 # -----------------------------------------------------------------------------
-def _density_tags(instance: Instance):
-    """Return (c_tag, g_tag_or_None) for filename construction.
 
-    Supports both legacy schema (density key) and new schema
-    (conflict_graph_density + graph_density).
-    """
-    c_density = instance.get("conflict_graph_density", instance.get("density"))
-    g_density = instance.get("graph_density", 1.0)
-    c_tag = f"d{int(round(c_density * 10000)):04d}"
-    if g_density is None or abs(g_density - 1.0) < 1e-9:
-        return c_tag, None
-    g_tag = f"g{int(round(g_density * 10000)):04d}"
-    return c_tag, g_tag
+_CATEGORY_PREFIX = {
+    "standard":   "instance",
+    "goldilocks": "difficult_instance_goldilockzone",
+    "degen":      "difficult_instance_degen",
+    "extreme":    "difficult_instance_extreme",
+}
+
+
+def _alpha_tag(instance: Instance) -> str:
+    """Graph density → tag string, e.g. 0.4 → 'a04', 1.0 → 'a10'."""
+    g = instance.get("graph_density", 1.0) or 1.0
+    return f"a{int(round(g * 10)):02d}"
+
+
+def _beta_tag(instance: Instance) -> str:
+    """Conflict density → tag string, e.g. 0.01 → 'b010', 0.001 → 'b001'."""
+    c = instance.get("conflict_graph_density", instance.get("density", 0.0))
+    return f"b{int(round(c * 1000)):03d}"
 
 
 def _instance_filename(instance: Instance) -> str:
     """Deterministic filename for an instance.
 
-    New sparse instances:  instance_n{n}_d{c_density}_g{g_density}_s{seed}.json
-    Complete-graph (legacy-compatible): instance_n{n}_d{density}_s{seed}.json
+    instance_n{n}_a{alpha}_b{beta}_s{seed}.json
+    difficult_instance_goldilockzone_n{n}_a{alpha}_b{beta}_s{seed}.json
+    difficult_instance_degen_n{n}_...  |  difficult_instance_extreme_n{n}_...
     """
-    c_tag, g_tag = _density_tags(instance)
-    if g_tag is None:
-        return f"instance_n{instance['n']}_{c_tag}_s{instance['seed']}.json"
-    return f"instance_n{instance['n']}_{c_tag}_{g_tag}_s{instance['seed']}.json"
+    category = instance.get("instance_category", "standard")
+    prefix = _CATEGORY_PREFIX.get(category, f"unknown_{category}")
+    n, seed = instance["n"], instance["seed"]
+    return f"{prefix}_n{n}_{_alpha_tag(instance)}_{_beta_tag(instance)}_s{seed}.json"
 
 
 def _result_filename(instance: Instance, heuristic_name: str) -> str:
-    """Filename for a heuristic result."""
-    c_tag, g_tag = _density_tags(instance)
-    mid = f"{c_tag}_{g_tag}" if g_tag else c_tag
-    return (f"result_n{instance['n']}_{mid}_s{instance['seed']}"
-            f"_{heuristic_name}.json")
+    """Filename for a heuristic result.
 
+    standard:  {heuristic_name}_n{n}_a{alpha}_b{beta}_s{seed}.json
+    difficult: difficult_{heuristic_name}_{type}_n{n}_a{alpha}_b{beta}_s{seed}.json
+    """
+    category = instance.get("instance_category", "standard")
+    n, seed = instance["n"], instance["seed"]
+    tags = f"n{n}_{_alpha_tag(instance)}_{_beta_tag(instance)}_s{seed}"
 
-def _subgradient_filename(instance: Instance) -> str:
-    """Filename for a cached subgradient result."""
-    c_tag, g_tag = _density_tags(instance)
-    mid = f"{c_tag}_{g_tag}" if g_tag else c_tag
-    return (f"subgradient_n{instance['n']}_{mid}_s{instance['seed']}"
-            f".json")
+    if category == "standard":
+        return f"{heuristic_name}_{tags}.json"
+    else:
+        return f"difficult_{heuristic_name}_{category}_{tags}.json"
 
 
 def save_instance(instance: Instance, directory: str = "instances") -> str:
@@ -246,60 +255,6 @@ def save_result(
     return fpath
 
 
-def save_subgradient_result(
-    instance: Instance,
-    subgradient_output: Dict[str, Any],
-    directory: str = "results",
-) -> str:
-    """Cache the output of subgradient_solve() for reuse by multiple heuristics.
-
-    Stored fields
-    -------------
-    LB, UB, gap_pct            — final bound quality metrics
-    incumbent_assignment        — assignment that achieved LB (x_LB)
-    iterations, runtime_seconds, terminated_reason
-    lambdas_sparse             — {index: value} dict of non-zero multipliers only
-                                 (saves space; reconstruct full vector via
-                                  np.zeros(n_conflicts) then assign by index)
-
-    Omitted: x_star_final (last subproblem solution, not a primal feasible
-    solution and not needed by downstream heuristics), full lambdas array.
-    """
-    os.makedirs(directory, exist_ok=True)
-    fpath = os.path.join(directory, _subgradient_filename(instance))
-
-    lambdas = subgradient_output.get("lambdas_final", [])
-    lambdas_sparse = {
-        str(i): float(v)
-        for i, v in enumerate(lambdas)
-        if v > 1e-12
-    }
-
-    payload = {
-        "LB":                   float(subgradient_output["LB"]),
-        "UB":                   float(subgradient_output["UB"]),
-        "gap_pct":              float(subgradient_output["gap_pct"]),
-        "incumbent_assignment": _jsonify(subgradient_output["x_LB"]),
-        "iterations":           int(subgradient_output["iterations"]),
-        "lambdas_sparse":       lambdas_sparse,
-        "num_lambdas":          len(lambdas),
-        "runtime_seconds":      float(subgradient_output["runtime_seconds"]),
-        "terminated_reason":    subgradient_output["terminated_reason"],
-    }
-    with open(fpath, "w") as f:
-        json.dump(payload, f, indent=2)
-    return fpath
-
-
-def load_subgradient_result(instance: Instance, directory: str = "results") -> Optional[Dict[str, Any]]:
-    """Load a cached subgradient result, or None if not present."""
-    fpath = os.path.join(directory, _subgradient_filename(instance))
-    if not os.path.exists(fpath):
-        return None
-    with open(fpath) as f:
-        return json.load(f)
-
-
 def _jsonify(obj: Any) -> Any:
     """Recursively convert tuples, numpy scalars, and arrays to JSON‑friendly types."""
     if isinstance(obj, dict):
@@ -323,6 +278,7 @@ def subgradient_solve(
     repair_fn: Optional[RepairFn] = None,
     K_max: int = config.SUBG_MAX_ITERS,
     epsilon: float = config.SUBG_EPSILON,
+    time_limit: float = config.HEURISTIC_TIME_LIMIT,
     verbose: bool = True,
 ) -> Dict[str, Any]:
     """Solve the Lagrangean dual of a MAX-APC instance by subgradient ascent.
@@ -344,6 +300,10 @@ def subgradient_solve(
         Maximum number of iterations.
     epsilon : float
         Tolerance for subgradient norm.
+    time_limit : float
+        Wall-clock budget in seconds (default 600 s = 10 min). The loop exits
+        at the start of the first iteration that would exceed this limit.
+        terminated_reason will be "time_limit" in that case.
     verbose : bool
         Print iteration progress.
 
@@ -351,7 +311,11 @@ def subgradient_solve(
     -------
     dict
         Contains: LB, UB, gap_pct, x_LB, x_star_final, iterations,
-        lambdas_final, runtime_seconds, terminated_reason.
+        lambdas_final, runtime_seconds, terminated_reason, iteration_history.
+
+        iteration_history is a list of per-iteration dicts with keys
+        {iter, LB, UB, pi_k, num_violations, elapsed_s} for plotting
+        bound convergence.
     """
     n = instance["n"]
     cost = np.array(instance["cost_matrix"], dtype=float)
@@ -388,9 +352,25 @@ def subgradient_solve(
     t_start = time.time()
     terminated_reason = "iteration_limit"
     x_star = list(E0)      # placeholder
+    iteration_history: List[Dict[str, float]] = []
+
+    def _record_iter():
+        iteration_history.append({
+            "iter": int(k),
+            "LB": float(LB),
+            "UB": float(UB),
+            "pi_k": float(pi_k),
+            "num_violations": int(num_violations),
+            "elapsed_s": float(time.time() - t_start),
+        })
 
     while k < K_max:
         k += 1
+
+        if time.time() - t_start >= time_limit:
+            terminated_reason = "time_limit"
+            _record_iter()
+            break
 
         # Build penalised profit matrix
         p_tilde = cost.copy()
@@ -430,6 +410,7 @@ def subgradient_solve(
                 if verbose:
                     print(f"  Iter {k}: feasible & complementary slackness → optimum")
                 terminated_reason = "complementary_slackness"
+                _record_iter()
                 break
 
             if obj > LB:
@@ -468,6 +449,7 @@ def subgradient_solve(
                 if verbose:
                     print(f"  Iter {k}: subgradient norm below tolerance")
                 terminated_reason = "small_subgradient"
+                _record_iter()
                 break
             alpha = pi_k * (Z_Lag - LB) / s_norm_sq
             lambdas = np.maximum(0.0, lambdas + alpha * s)
@@ -476,6 +458,8 @@ def subgradient_solve(
             gap_pct = ((UB - LB) / max(abs(LB), 1e-10)) * 100.0
             print(f"  Iter {k:4d}: LB = {LB:.2f}, UB = {UB:.2f}, "
                   f"gap = {gap_pct:.2f}%, pi = {pi_k:.6f}")
+
+        _record_iter()
 
     runtime = time.time() - t_start
     gap_pct = ((UB - LB) / max(abs(LB), 1e-10)) * 100.0
@@ -495,6 +479,7 @@ def subgradient_solve(
         "lambdas_final": [float(v) for v in lambdas],
         "runtime_seconds": float(runtime),
         "terminated_reason": terminated_reason,
+        "iteration_history": iteration_history,
     }
 
 
@@ -503,5 +488,4 @@ __all__ = [
     "hungarian_max", "find_violations",
     "subgradient_solve",
     "save_instance", "load_instance", "save_result",
-    "save_subgradient_result", "load_subgradient_result",
 ]

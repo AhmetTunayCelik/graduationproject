@@ -51,7 +51,7 @@ def enumerate_instances(
         return []
     instances = []
     for fname in os.listdir(instance_dir):
-        if not fname.startswith("instance_n") or not fname.endswith(".json"):
+        if not (fname.startswith("instance_") or fname.startswith("difficult_instance_")) or not fname.endswith(".json"):
             continue
         fpath = os.path.join(instance_dir, fname)
         try:
@@ -74,39 +74,39 @@ def run_single_combination(
     has_orderings: bool,
     result_dir: str,
     force_heuristic: bool = False,
-    subgradient_cache_dir: str = "results",
 ) -> bool:
-    """Run a single heuristic on a single instance (subgradient cached)."""
+    """Run a single heuristic on a single instance.
+
+    Each call performs a fresh in-memory subgradient ascent (no cache) using
+    the heuristic itself as the repair_fn, so that the heuristic pays the
+    full CPU cost of producing its own dual bounds. This makes runtime
+    comparisons against Gurobi fair.
+    """
     result_path = os.path.join(result_dir, ab._result_filename(instance, heuristic_name))
     if not force_heuristic and os.path.exists(result_path):
         return False
 
-    subg = ab.load_subgradient_result(instance, directory=subgradient_cache_dir)
-    if subg is None:
-        try:
-            default_module = importlib.import_module("heuristics.lagrangean_repair")
-            repair_fn = default_module.run
-        except ImportError:
-            repair_fn = None
-        subg = ab.subgradient_solve(
-            instance,
-            repair_fn=repair_fn,
-            K_max=config.SUBG_MAX_ITERS,
-            verbose=False,
-        )
-        ab.save_subgradient_result(instance, subg, directory=subgradient_cache_dir)
-
-    x_star = subg.get("x_star_final") or subg["incumbent_assignment"]
     cost = instance["cost_matrix"]
     conflicts = instance["conflicts"]
     n = instance["n"]
     E0 = instance["E0"]
+
+    subg = ab.subgradient_solve(
+        instance,
+        repair_fn=heuristic_run,
+        K_max=config.SUBG_MAX_ITERS,
+        verbose=False,
+    )
+
+    x_star = subg["x_star_final"]
 
     result_payload = {
         "subgradient_LB": subg.get("LB"),
         "subgradient_UB": subg.get("UB"),
         "subgradient_iterations": subg.get("iterations"),
         "subgradient_runtime": subg.get("runtime_seconds"),
+        "subgradient_terminated_reason": subg.get("terminated_reason"),
+        "subgradient_history": subg.get("iteration_history"),
         "heuristic_name": heuristic_name,
     }
 
@@ -126,7 +126,7 @@ def run_single_combination(
         start_time = time.time()
         try:
             assignment, objective, feasible = heuristic_run(
-                x_star, cost, conflicts, n, E0, lambdas=subg.get("lambdas_final") or subg.get("lambdas_sparse")
+                x_star, cost, conflicts, n, E0, lambdas=subg.get("lambdas_final")
             )
         except TypeError:
             assignment, objective, feasible = heuristic_run(x_star, cost, conflicts, n)
@@ -150,7 +150,7 @@ def main():
     parser.add_argument("--n-values", type=int, nargs="+", help="Filter instances by n")
     parser.add_argument("--densities", type=float, nargs="+", help="Filter instances by density")
     parser.add_argument("--instance-dir", default="instances", help="Directory containing instance JSONs")
-    parser.add_argument("--result-dir", default="results", help="Directory for results and subgradient cache")
+    parser.add_argument("--result-dir", default="results", help="Directory for heuristic result JSONs")
     parser.add_argument("--force-heuristic", action="store_true", help="Rerun heuristic even if result exists")
     parser.add_argument("--quiet", action="store_true", help="Suppress progress output")
     args = parser.parse_args()
@@ -183,14 +183,26 @@ def main():
 
     total_heuristic_calls = 0
     saved = 0
-    for inst in instances:
-        for hname, hmod, hrun, has_ord in to_run:
-            if run_single_combination(inst, hname, hmod, hrun, has_ord,
-                                      args.result_dir, args.force_heuristic):
+
+    # Process one heuristic across all instances, then move to next heuristic
+    for hname, hmod, hrun, has_ord in to_run:
+        if not args.quiet:
+            print(f"\n{hname}: processing {len(instances)} instances...")
+
+        for inst in instances:
+            # Each run_single_combination checks if result exists and skips if present
+            is_new = run_single_combination(inst, hname, hmod, hrun, has_ord,
+                                            args.result_dir, args.force_heuristic)
+            if is_new:
                 saved += 1
+                status = "generated"
+            else:
+                status = "skipped"
             total_heuristic_calls += 1
-            if not args.quiet and (total_heuristic_calls % 10 == 0):
-                print(f"Processed {total_heuristic_calls} heuristic/instance pairs...")
+
+            if not args.quiet:
+                instance_name = f"n{inst['n']}_a{int(round((inst.get('graph_density', 1.0) or 1.0) * 10)):02d}_b{int(round(inst.get('conflict_graph_density', 0) * 1000)):03d}_s{inst['seed']}"
+                print(f"  [{total_heuristic_calls}] {instance_name:40s} → {status}")
 
     print(f"\nBatch finished. Saved {saved} new results (out of {total_heuristic_calls} calls).")
 

@@ -62,6 +62,7 @@ def generate_instance(
     graph_density: Optional[float] = None,
     cost_low: int = 1,
     cost_high: int = 100,
+    instance_category: str = "standard",
     # Legacy alias: old callers used `density` for conflict density
     density: Optional[float] = None,
 ) -> ab.Instance:
@@ -259,6 +260,7 @@ def generate_instance(
         "density": eff_conflict_density,
         "num_conflicts": len(conflicts),
         "graph_edges": list(graph_edges),  # list of (i,j) tuples, sorted
+        "instance_category": instance_category,
     }
 
 
@@ -269,6 +271,7 @@ def generate_batch(
     graph_densities: Optional[List[Optional[float]]] = None,
     directory: str = "instances",
     force: bool = False,
+    instance_category: str = "standard",
     # Legacy alias
     densities: Optional[List[float]] = None,
 ) -> Tuple[int, int]:
@@ -307,16 +310,27 @@ def generate_batch(
     for n, c_density, g_density, seed in itertools.product(
         n_values, conflict_graph_densities, graph_densities, seeds
     ):
+        # Check if file exists BEFORE generating (expensive operation)
+        temp_inst = {
+            "n": n,
+            "seed": seed,
+            "conflict_graph_density": c_density,
+            "graph_density": g_density or 1.0,
+            "instance_category": instance_category,
+        }
+        fpath = os.path.join(directory, ab._instance_filename(temp_inst))
+        if not force and os.path.exists(fpath):
+            skipped += 1
+            continue
+
+        # Only generate if file doesn't exist
         instance = generate_instance(
             n=n,
             seed=seed,
             conflict_graph_density=c_density,
             graph_density=g_density,
+            instance_category=instance_category,
         )
-        fpath = os.path.join(directory, ab._instance_filename(instance))
-        if not force and os.path.exists(fpath):
-            skipped += 1
-            continue
         ab.save_instance(instance, directory=directory)
         created += 1
 

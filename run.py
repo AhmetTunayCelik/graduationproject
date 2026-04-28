@@ -43,20 +43,6 @@ def main():
     ab.save_instance(instance, args.instance_dir)
     print(f"Instance: n={args.n}, density={args.density}, seed={args.seed}")
 
-    # Run subgradient (cached)
-    subg = ab.load_subgradient_result(instance, args.result_dir)
-    if subg is None:
-        import heuristics.lagrangean_repair as default_repair
-        subg = ab.subgradient_solve(
-            instance,
-            repair_fn=default_repair.run,
-            K_max=config.SUBG_MAX_ITERS,
-            verbose=not args.quiet,
-        )
-        ab.save_subgradient_result(instance, subg, args.result_dir)
-    else:
-        print("Using cached subgradient result.")
-
     available = discover_heuristics()
     if args.heuristics:
         to_run = [(name, mod, run_fn, has_ord) for name, (mod, run_fn, has_ord) in available.items()
@@ -66,6 +52,15 @@ def main():
 
     print(f"\nRunning {len(to_run)} heuristic(s): {[name for name,_,_,_ in to_run]}")
     for hname, hmod, hrun, has_ord in to_run:
+        # Each heuristic runs its own subgradient ascent fresh (no cache)
+        # using itself as the repair_fn so it pays the full CPU cost.
+        subg = ab.subgradient_solve(
+            instance,
+            repair_fn=hrun,
+            K_max=config.SUBG_MAX_ITERS,
+            verbose=not args.quiet,
+        )
+
         t0 = time.time()
         if has_ord:
             variants = hmod.run_all_orderings(
@@ -79,6 +74,10 @@ def main():
             result_payload = {
                 "subgradient_LB": subg.get("LB"),
                 "subgradient_UB": subg.get("UB"),
+                "subgradient_iterations": subg.get("iterations"),
+                "subgradient_runtime": subg.get("runtime_seconds"),
+                "subgradient_terminated_reason": subg.get("terminated_reason"),
+                "subgradient_history": subg.get("iteration_history"),
                 "heuristic_output": {
                     "ordering_variants": variants,
                     "runtime_seconds": elapsed,
@@ -105,6 +104,10 @@ def main():
             result_payload = {
                 "subgradient_LB": subg.get("LB"),
                 "subgradient_UB": subg.get("UB"),
+                "subgradient_iterations": subg.get("iterations"),
+                "subgradient_runtime": subg.get("runtime_seconds"),
+                "subgradient_terminated_reason": subg.get("terminated_reason"),
+                "subgradient_history": subg.get("iteration_history"),
                 "heuristic_output": {
                     "assignment": assignment,
                     "objective": obj,
@@ -112,8 +115,8 @@ def main():
                     "runtime_seconds": elapsed,
                 },
             }
-        ab.save_result(instance, hname, result_payload, directory=args.result_dir)
-        print(f"  {hname}: completed in {elapsed:.3f}s")
+        ab.save_result(instance, hname, result_payload, directory=args.result_dir, subgradient_output=subg)
+        print(f"  {hname}: subgradient {subg['runtime_seconds']:.3f}s + heuristic {elapsed:.3f}s")
 
 
 if __name__ == "__main__":

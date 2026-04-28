@@ -14,54 +14,51 @@ RESULTS_DIR = "results"
 ANALYSIS_DIR = "analysis_output"
 
 # ---------------------------------------------------------
-# GLOBAL GRAPH PARAMETERS
+# GLOBAL PARAMETERS
 # ---------------------------------------------------------
-ALPHA = 1.0  # 1.0 = Complete graph (dense). Set < 1.0 for sparse.
+UNIVERSAL_SEEDS = list(range(1, 11))   # Exactly 10 seeds for statistical balance
+GRAPH_DENSITIES = [0.4, 0.6, 0.8, 1.0] # The alpha parameter (graph edge density)
 DEFAULT_COST_LOW = 1
 DEFAULT_COST_HIGH = 100
 
 # ---------------------------------------------------------
-# GENERATOR 1: STANDARD INSTANCES (generate_many_instances.py)
+# GENERATOR 1: STANDARD INSTANCES (Unified Grid)
 # ---------------------------------------------------------
-# Small instances (Wide beta range, high replication)
-STD_SMALL_N = [10, 20]
-STD_SMALL_BETAS = [0.001, 0.005, 0.010, 0.020, 0.050]
-STD_SMALL_SEEDS = list(range(1, 11))  # 10 seeds
-
-# Medium instances
-STD_MED_N = [30, 50]
-STD_MED_BETAS = [0.0002, 0.0005, 0.001, 0.003, 0.008]
-STD_MED_SEEDS = list(range(1, 8))     # 7 seeds
-
-# Large instances (Tight beta range, lower replication)
-STD_LARGE_N = [75, 100]
-STD_LARGE_BETAS = [0.00005, 0.0001, 0.00015, 0.0002, 0.0003]
-STD_LARGE_SEEDS = list(range(1, 6))   # 5 seeds
+GRID_N = [20, 30, 40, 50]
+GRID_BETAS = [0.01, 0.05, 0.10, 0.15]
 
 # ---------------------------------------------------------
-# GENERATOR 2: DIFFICULT INSTANCES (generate_difficult_instances.py)
+# GENERATOR 2: DIFFICULT INSTANCES
 # ---------------------------------------------------------
-# Phase Transition (High Beta to explode Branch & Bound)
+
+# A. The Goldilocks Zone (Branch & Bound Explosion)
+# Phase-transition sweep: highly constrained but feasible region.
 DIFF_GOLDILOCKS_N = [40, 50]
-DIFF_GOLDILOCKS_BETAS = [0.01, 0.03, 0.05, 0.08, 0.12, 0.15]
-DIFF_GOLDILOCKS_SEEDS = list(range(1, 6))
+DIFF_GOLDILOCKS_ALPHAS = [0.4, 0.6, 0.8, 1.0]
+DIFF_GOLDILOCKS_BETAS = [0.15, 0.20, 0.25, 0.30]
+# Uses UNIVERSAL_SEEDS (10 seeds)
 
-# Degeneracy (Flat costs to break LP pruning)
+# B. Degeneracy (The "Flat Cost" Trap)
+# Tight cost band defeats Gurobi's LP-bound pruning.
 DIFF_DEGEN_N = [30, 40, 50]
-DIFF_DEGEN_BETAS = [0.005, 0.01, 0.02, 0.05]
-DIFF_DEGEN_SEEDS = list(range(1, 6))
+DIFF_DEGEN_ALPHAS = [0.4, 0.6, 0.8, 1.0]
+DIFF_DEGEN_BETAS = [0.05, 0.10, 0.15]
 DIFF_DEGEN_COST_LOW = 95
 DIFF_DEGEN_COST_HIGH = 100
+# Uses UNIVERSAL_SEEDS (10 seeds)
 
-# Extreme Scale (Testing pure dimensionality limits)
-DIFF_EXTREME_N = [100, 150, 200]
-DIFF_EXTREME_BETAS = [0.00005, 0.0001, 0.0002]
-DIFF_EXTREME_SEEDS = list(range(1, 4))
+# C. Extreme Scale (Pure Dimensionality Limits)
+# Alpha capped at 0.6 to keep conflict-pair pool tractable at n=150.
+DIFF_EXTREME_N = [100, 150]
+DIFF_EXTREME_ALPHAS = [0.2, 0.4, 0.6]
+DIFF_EXTREME_BETAS = [0.001, 0.005]
+DIFF_EXTREME_SEEDS = list(range(1, 6))  # 5 seeds to prevent memory crashes
 
 # ---------------------------------------------------------
 # EXACT SOLVER (GUROBI)
 # ---------------------------------------------------------
-GUROBI_TIME_LIMIT = 300.0  # 5 minutes maximum runtime
+GUROBI_TIME_LIMIT = 600.0     # 10 minutes maximum runtime
+HEURISTIC_TIME_LIMIT = 600.0  # 10 minutes maximum runtime (subgradient + repair)
 GUROBI_THREADS = 0         # 0 = use all available cores
 GUROBI_OUTPUT_FLAG = 0     # 0 = quiet, 1 = verbose
 
