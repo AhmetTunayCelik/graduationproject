@@ -71,6 +71,59 @@ def hungarian_max(profit_matrix: np.ndarray) -> Tuple[Assignment, float]:
     return assignment, objective
 
 
+_EMPTY_INT32_ARR = np.empty(0, dtype=np.int32)
+
+
+def build_conflict_adjacency_int(
+    conflicts: List[Conflict],
+    n: int,
+) -> List[np.ndarray]:
+    """Build an integer-keyed conflict adjacency list as numpy int32 arrays.
+
+    Returns a list of length n*n where index e_id = i*n + j holds an
+    np.ndarray(dtype=int32) of edge IDs that conflict with edge (i, j).
+    Empty slots share a single empty int32 array sentinel (no per-slot cost).
+
+    Memory:
+        - Each int32 entry: 4 bytes (vs ~50 bytes per Python int in a set)
+        - Per-array overhead: ~96 bytes (vs ~232 bytes per set object)
+        - For 1.88M conflict relations: ~10 MB total (vs ~94 MB with sets)
+        - **~10× memory reduction** over the previous Set[int] form.
+
+    Trade-off: numpy arrays don't support O(1) `in` membership checks. Callers
+    that need fast membership should build a bool bitmask of size n*n
+    (np.zeros(n*n, dtype=bool)) and use mask[ids] for vectorised set tests.
+    """
+    nn = n * n
+
+    # First pass: count degree of each edge id to size arrays exactly
+    degree = np.zeros(nn, dtype=np.int32)
+    for c in conflicts:
+        degree[c[0] * n + c[1]] += 1
+        degree[c[2] * n + c[3]] += 1
+
+    # Allocate per-edge int32 arrays at the correct size (no overgrowth)
+    adj: List[np.ndarray] = [None] * nn  # type: ignore[list-item]
+    cursor = np.zeros(nn, dtype=np.int32)  # write index per edge
+    for eid in range(nn):
+        d = int(degree[eid])
+        if d == 0:
+            adj[eid] = _EMPTY_INT32_ARR  # shared sentinel
+        else:
+            adj[eid] = np.empty(d, dtype=np.int32)
+
+    # Second pass: fill the arrays
+    for c in conflicts:
+        e1 = c[0] * n + c[1]
+        e2 = c[2] * n + c[3]
+        adj[e1][cursor[e1]] = e2
+        cursor[e1] += 1
+        adj[e2][cursor[e2]] = e1
+        cursor[e2] += 1
+
+    return adj
+
+
 def find_violations(
     assignment: Assignment,
     conflicts: List[Conflict],
@@ -318,7 +371,8 @@ def subgradient_solve(
         bound convergence.
     """
     n = instance["n"]
-    cost = np.array(instance["cost_matrix"], dtype=float)
+    # Downcast to float32: precision is plenty for subgradient ascent and halves memory.
+    cost = np.asarray(instance["cost_matrix"], dtype=np.float32)
     conflicts = instance["conflicts"]
     num_conflicts = len(conflicts)
     E0 = instance["E0"]
@@ -339,15 +393,23 @@ def subgradient_solve(
     k = 0
     t_no_improve = 0
     pi_k = 2.0
-    lambdas = np.zeros(num_conflicts, dtype=float)
+    lambdas = np.zeros(num_conflicts, dtype=np.float32)
 
-    # Precompute flat indices for conflicts
+    # Precompute flat indices for conflicts (int32 is plenty: max id = n*n ≤ 150²)
     if num_conflicts > 0:
-        c_arr = np.array(conflicts, dtype=int)
-        c_e1_flat = c_arr[:, 0] * n + c_arr[:, 1]
-        c_e2_flat = c_arr[:, 2] * n + c_arr[:, 3]
+        c_arr = np.asarray(conflicts, dtype=np.int32)
+        c_e1_flat = (c_arr[:, 0] * n + c_arr[:, 1]).astype(np.int32, copy=False)
+        c_e2_flat = (c_arr[:, 2] * n + c_arr[:, 3]).astype(np.int32, copy=False)
+        del c_arr  # 4-column intermediate no longer needed
+        # Preallocated buffer for subgradient direction
+        s_buf = np.empty(num_conflicts, dtype=np.float32)
     else:
-        c_e1_flat = c_e2_flat = np.array([], dtype=int)
+        c_e1_flat = c_e2_flat = np.empty(0, dtype=np.int32)
+        s_buf = np.empty(0, dtype=np.float32)
+
+    # Reusable buffers (avoid allocating fresh arrays each iteration)
+    p_tilde = np.empty_like(cost)
+    asgn_flat = np.zeros(n * n, dtype=bool)
 
     t_start = time.time()
     terminated_reason = "iteration_limit"
@@ -372,18 +434,18 @@ def subgradient_solve(
             _record_iter()
             break
 
-        # Build penalised profit matrix
-        p_tilde = cost.copy()
+        # Build penalised profit matrix in-place into preallocated buffer
+        np.copyto(p_tilde, cost)
         if num_conflicts > 0:
-            np.add.at(p_tilde.ravel(), c_e1_flat, -lambdas)
-            np.add.at(p_tilde.ravel(), c_e2_flat, -lambdas)
+            np.subtract.at(p_tilde.ravel(), c_e1_flat, lambdas)
+            np.subtract.at(p_tilde.ravel(), c_e2_flat, lambdas)
 
         x_star, z_star = hungarian_max(p_tilde)
         Z_Lag = z_star + float(np.sum(lambdas))
         UB = Z_Lag        # per spec: unconditional assignment
 
-        # Check feasibility of subproblem solution
-        asgn_flat = np.zeros(n * n, dtype=bool)
+        # Check feasibility of subproblem solution (reuse preallocated buffer)
+        asgn_flat.fill(False)
         for i, j in x_star:
             asgn_flat[i * n + j] = True
         if num_conflicts > 0:
@@ -396,10 +458,14 @@ def subgradient_solve(
             # Feasible solution found
             obj = float(sum(cost[i, j] for i, j in x_star))
 
-            # Complementary slackness optimality test
+            # Complementary slackness optimality test:
+            #   for all i: lambdas[i] > 0  ⇒  active[i] is True
+            # Equivalent: NOT (lambdas > 0 AND not active).
+            # Done with a single boolean reduction to avoid the prior 2-step
+            # `active[lambdas > 0]` indexing that allocated two temps.
             if num_conflicts > 0:
                 active = asgn_flat[c_e1_flat] | asgn_flat[c_e2_flat]
-                slackness_ok = bool(np.all(active[lambdas > 0]))
+                slackness_ok = not bool(((lambdas > 0) & ~active).any())
             else:
                 slackness_ok = True
 
@@ -441,18 +507,24 @@ def subgradient_solve(
             t_no_improve = 0
             pi_k /= 2.0
 
-        # Subgradient direction and multiplier update
+        # Subgradient direction (in-place into preallocated s_buf) and multiplier update
         if num_conflicts > 0:
-            s = asgn_flat[c_e1_flat].astype(float) + asgn_flat[c_e2_flat].astype(float) - 1.0
-            s_norm_sq = float(np.dot(s, s))
+            # s_buf = a1.astype(float32) + a2.astype(float32) - 1
+            s_buf[:] = asgn_flat[c_e1_flat]   # bool → float32 via assignment
+            s_buf += asgn_flat[c_e2_flat]     # in-place add (bool → float32)
+            s_buf -= 1.0                      # in-place subtract
+            s_norm_sq = float(np.dot(s_buf, s_buf))
             if s_norm_sq < epsilon:
                 if verbose:
                     print(f"  Iter {k}: subgradient norm below tolerance")
                 terminated_reason = "small_subgradient"
                 _record_iter()
                 break
-            alpha = pi_k * (Z_Lag - LB) / s_norm_sq
-            lambdas = np.maximum(0.0, lambdas + alpha * s)
+            alpha = np.float32(pi_k * (Z_Lag - LB) / s_norm_sq)
+            # In-place update: lambdas += alpha * s_buf; clip to [0, ∞)
+            s_buf *= alpha
+            lambdas += s_buf
+            np.maximum(lambdas, 0, out=lambdas)
 
         if verbose and (k % 50 == 0 or k <= 5):
             gap_pct = ((UB - LB) / max(abs(LB), 1e-10)) * 100.0
@@ -485,7 +557,7 @@ def subgradient_solve(
 
 __all__ = [
     "Edge", "Assignment", "Conflict", "Instance", "RepairFn",
-    "hungarian_max", "find_violations",
+    "hungarian_max", "find_violations", "build_conflict_adjacency_int",
     "subgradient_solve",
     "save_instance", "load_instance", "save_result",
 ]

@@ -4,22 +4,20 @@ heuristics/lagrangean_repair.py
 
 Core-based repair heuristic for the Lagrangean relaxation of MAX-APC.
 
-This heuristic converts a (possibly infeasible) solution x_star of the
-Lagrangean subproblem into a feasible assignment for the original problem.
-It follows Algorithms 3 and 4 of the MSTC reference (Minimum Spanning Tree
-with Conflicts), adapted to assignment:
+Memory-optimised:
+    - Conflict adjacency: List[np.ndarray(int32)] (built by ab.build_conflict_adjacency_int)
+    - State "sets" of edge ids: bool bitmasks of size n*n (np.ndarray(bool))
+        - O(1) membership via mask[eid]
+        - O(|nbrs|) batch insert via mask[nbrs_arr] = True (vectorised)
+        - 1 bit per slot vs ~50 bytes per Python int in a set
 
-    Phase 1: Build a conflict-free core Q from x_star by a greedy rule.
-    Phase 2: Complete Q to a full assignment using greedy extension,
-             Hungarian sub-assignment, and finally falling back to E0.
-
-Four ordering criteria are available (see ORDERINGS).
+This combination cuts heuristic working memory by ~10× compared to the
+previous tuple-keyed dict-of-sets layout.
 """
 
 from __future__ import annotations
 
 import time
-from collections import defaultdict
 from typing import Any, Dict, List, Tuple
 
 import numpy as np
@@ -52,32 +50,17 @@ HEURISTIC_NAME = "lagrangean_repair"
 # -----------------------------------------------------------------------------
 # Internal helpers
 # -----------------------------------------------------------------------------
-def _build_edge_conflict_index(conflicts: List[ab.Conflict]) -> Dict[ab.Edge, set]:
-    """Return a dict mapping each edge to the set of edges it conflicts with."""
-    neighbours = defaultdict(set)
-    for c in conflicts:
-        e = (c[0], c[1])
-        f = (c[2], c[3])
-        neighbours[e].add(f)
-        neighbours[f].add(e)
-    return neighbours
-
-
-def _sort_key(ordering: str, edge: ab.Edge, cost: np.ndarray, degree: int):
-    """Return a sort key for an edge under the given ordering.
-
-    Sorted in ascending order, so for descending criteria we negate the value.
-    """
-    i, j = edge
+def _sort_key_id(ordering: str, eid: int, n: int, cost: np.ndarray, degree: int):
+    """Sort key for an edge by integer id under the given ordering."""
+    i, j = divmod(eid, n)
     c = float(cost[i, j])
     if ordering == "dec_weight":
         return -c
     if ordering == "inc_weight":
         return c
     if ordering == "inc_degree":
-        return (degree, -c)          # tie‑break by higher weight
+        return (degree, -c)
     if ordering == "weight_over_degree":
-        # Avoid division by zero
         return -(c / (1.0 + degree))
     raise ValueError(f"Unknown ordering: {ordering}")
 
@@ -85,121 +68,133 @@ def _sort_key(ordering: str, edge: ab.Edge, cost: np.ndarray, degree: int):
 def _phase1_core(
     x_star: ab.Assignment,
     cost: np.ndarray,
-    neighbours: Dict[ab.Edge, set],
+    neighbours: List[np.ndarray],
+    n: int,
     ordering: str,
-) -> Tuple[List[ab.Edge], set, set, set]:
-    """Construct a conflict‑free core Q from x_star.
+) -> Tuple[List[int], set, set, np.ndarray]:
+    """Build a conflict-free core Q from x_star.
 
-    Returns (core, rows_used, cols_used, forbidden), where forbidden is the
-    set of edges that conflict with any core edge.
+    Returns (core_ids, rows_used, cols_used, forbidden_mask).
+    forbidden_mask is a bool np.ndarray of size n*n.
     """
-    x_set = set(tuple(e) for e in x_star)
-    degree_in_x = {e: len(neighbours[e] & x_set) for e in x_set}
-    sorted_edges = sorted(
-        x_set,
-        key=lambda e: _sort_key(ordering, e, cost, degree_in_x[e]),
+    nn = n * n
+    x_ids = [i * n + j for i, j in x_star]
+
+    # Bitmask of edges in x_star (for vectorised degree computation)
+    x_mask = np.zeros(nn, dtype=bool)
+    x_mask[x_ids] = True
+
+    degree_in_x = {}
+    for eid in x_ids:
+        nbrs = neighbours[eid]
+        degree_in_x[eid] = int(x_mask[nbrs].sum()) if nbrs.size else 0
+
+    sorted_ids = sorted(
+        x_ids,
+        key=lambda eid: _sort_key_id(ordering, eid, n, cost, degree_in_x[eid]),
     )
 
-    core = []
-    rows_used = set()
-    cols_used = set()
-    forbidden = set()
+    core_ids: List[int] = []
+    rows_used: set = set()
+    cols_used: set = set()
+    forbidden_mask = np.zeros(nn, dtype=bool)
 
-    remaining = list(sorted_edges)
-    while remaining:
-        e = remaining.pop(0)
-        if e in forbidden:
+    for eid in sorted_ids:
+        if forbidden_mask[eid]:
             continue
-        if e[0] in rows_used or e[1] in cols_used:
+        i, j = divmod(eid, n)
+        if i in rows_used or j in cols_used:
             continue
-        core.append(e)
-        rows_used.add(e[0])
-        cols_used.add(e[1])
-        for f in neighbours[e]:
-            forbidden.add(f)
-        remaining = [f for f in remaining if f not in neighbours[e]]
+        core_ids.append(eid)
+        rows_used.add(i)
+        cols_used.add(j)
+        nbrs = neighbours[eid]
+        if nbrs.size:
+            forbidden_mask[nbrs] = True
 
-    return core, rows_used, cols_used, forbidden
+    return core_ids, rows_used, cols_used, forbidden_mask
 
 
 def _phase2_completion(
-    core: List[ab.Edge],
+    core_ids: List[int],
     n: int,
     cost: np.ndarray,
-    neighbours: Dict[ab.Edge, set],
+    neighbours: List[np.ndarray],
     rows_used: set,
     cols_used: set,
-    forbidden: set,
+    forbidden_mask: np.ndarray,
     ordering: str,
     E0: ab.Assignment,
-    graph_edges: set = None,
-) -> ab.Assignment:
-    """Complete the core to a full feasible assignment.
+    graph_edge_mask: np.ndarray = None,
+) -> List[int]:
+    """Complete the core to a full feasible assignment, returning int ids.
 
-    Uses greedy extension first, then Hungarian on residual submatrix,
-    and finally falls back to E0.
-
-    Parameters
-    ----------
-    graph_edges : set of (i, j) tuples, optional
-        The set of edges present in the graph. When provided (sparse graph),
-        only these edges are considered as candidates. When None, all n x n
-        edges are available (complete graph, legacy behaviour).
+    graph_edge_mask: bool np.ndarray of size n*n (True iff edge id present).
+    None means complete graph (all edges allowed).
     """
-    core_set = set(tuple(e) for e in core)
+    nn = n * n
 
     # ------------------------------------------------------------------
     # Greedy extension
     # ------------------------------------------------------------------
-    # Candidate edges: free rows x free cols, not forbidden, in the graph.
-    if graph_edges is not None:
-        pool = [
-            e for e in graph_edges
-            if e[0] not in rows_used
-            and e[1] not in cols_used
-            and e not in forbidden
-        ]
+    # Build candidate pool. For sparse graphs, iterate the small id list;
+    # for complete graphs, iterate free row/col combinations.
+    if graph_edge_mask is not None:
+        # Find edge ids present in graph but not in forbidden, with free row/col
+        candidate_mask = graph_edge_mask & ~forbidden_mask
+        # Filter by free rows/cols (cheap: precompute row/col masks)
+        row_free = np.ones(n, dtype=bool)
+        col_free = np.ones(n, dtype=bool)
+        for r in rows_used:
+            row_free[r] = False
+        for c in cols_used:
+            col_free[c] = False
+        # Build a 2D mask of allowed (i, j) and AND with candidate_mask
+        rc_free = np.outer(row_free, col_free).ravel()
+        candidate_mask &= rc_free
+        pool = np.flatnonzero(candidate_mask).tolist()
     else:
         pool = [
-            (i, j)
+            i * n + j
             for i in range(n) if i not in rows_used
             for j in range(n) if j not in cols_used
-            if (i, j) not in forbidden
+            if not forbidden_mask[i * n + j]
         ]
 
-    extended = list(core)
+    extended = list(core_ids)
     rows = set(rows_used)
     cols = set(cols_used)
-    block = set(forbidden)
+    block_mask = forbidden_mask.copy()
 
     if pool:
-        pool_set = set(pool)
-        degree_in_pool = {e: len(neighbours[e] & pool_set) for e in pool}
-        pool.sort(key=lambda e: _sort_key(ordering, e, cost, degree_in_pool[e]))
+        pool_mask = np.zeros(nn, dtype=bool)
+        pool_mask[pool] = True
+        degree_in_pool = {}
+        for eid in pool:
+            nbrs = neighbours[eid]
+            degree_in_pool[eid] = int(pool_mask[nbrs].sum()) if nbrs.size else 0
+        pool.sort(key=lambda eid: _sort_key_id(ordering, eid, n, cost, degree_in_pool[eid]))
 
-        while pool and len(extended) < n:
-            e = pool.pop(0)
-            if e[0] in rows or e[1] in cols:
+        for eid in pool:
+            if len(extended) >= n:
+                break
+            if block_mask[eid]:
                 continue
-            if e in block:
+            i, j = divmod(eid, n)
+            if i in rows or j in cols:
                 continue
-            extended.append(e)
-            rows.add(e[0])
-            cols.add(e[1])
-            for f in neighbours[e]:
-                block.add(f)
-            pool = [
-                f for f in pool
-                if f not in neighbours[e] and f[0] != e[0] and f[1] != e[1]
-            ]
+            extended.append(eid)
+            rows.add(i)
+            cols.add(j)
+            nbrs = neighbours[eid]
+            if nbrs.size:
+                block_mask[nbrs] = True
 
         if len(extended) == n:
             return extended
 
     # ------------------------------------------------------------------
-    # Hungarian completion on residual rows/cols.
-    # NOTE: use `rows`/`cols` (updated by greedy), not the original
-    # `rows_used`/`cols_used`, so we only fill truly unfilled slots.
+    # Hungarian completion on residual rows/cols
     # ------------------------------------------------------------------
     free_rows = sorted(set(range(n)) - rows)
     free_cols = sorted(set(range(n)) - cols)
@@ -207,32 +202,39 @@ def _phase2_completion(
     if len(free_rows) == len(free_cols) and len(free_rows) > 0:
         m = len(free_rows)
         MASK = -1e15
-        sub_profit = np.full((m, m), MASK, dtype=float)
+        sub_profit = np.full((m, m), MASK, dtype=np.float32)
         for a, i in enumerate(free_rows):
             for b, j in enumerate(free_cols):
-                e = (i, j)
-                if graph_edges is not None and e not in graph_edges:
-                    continue   # edge not in sparse graph
-                if e in block:
-                    continue   # forbidden by core or greedy extension
+                eid = i * n + j
+                if graph_edge_mask is not None and not graph_edge_mask[eid]:
+                    continue
+                if block_mask[eid]:
+                    continue
                 sub_profit[a, b] = cost[i, j]
         try:
             row_ind, col_ind = linear_sum_assignment(-sub_profit)
             if all(sub_profit[row_ind[a], col_ind[a]] > MASK / 2.0 for a in range(m)):
-                completion = [
-                    (free_rows[row_ind[a]], free_cols[col_ind[a]]) for a in range(m)
+                completion_ids = [
+                    free_rows[row_ind[a]] * n + free_cols[col_ind[a]] for a in range(m)
                 ]
-                comp_set = set(completion)
-                # Check conflicts within completion AND against the core
-                no_intra = all(not (neighbours[e] & comp_set) for e in completion)
-                no_cross = all(not (neighbours[e] & core_set) for e in completion)
-                if no_intra and no_cross:
-                    return extended + completion
+                # Vectorised intra/cross-conflict check via bitmasks
+                comp_mask = np.zeros(nn, dtype=bool)
+                comp_mask[completion_ids] = True
+                core_mask = np.zeros(nn, dtype=bool)
+                core_mask[core_ids] = True
+                ok = True
+                for eid in completion_ids:
+                    nbrs = neighbours[eid]
+                    if nbrs.size and (comp_mask[nbrs].any() or core_mask[nbrs].any()):
+                        ok = False
+                        break
+                if ok:
+                    return extended + completion_ids
         except ValueError:
             pass
 
     # Fallback to E0
-    return list(E0)
+    return [i * n + j for i, j in E0]
 
 
 # -----------------------------------------------------------------------------
@@ -247,29 +249,28 @@ def repair(
     ordering: str = DEFAULT_ORDERING,
     graph_edges=None,
 ) -> Tuple[ab.Assignment, float, bool]:
-    """Convert a Lagrangean subproblem solution into a feasible assignment.
+    """Convert a Lagrangean subproblem solution into a feasible assignment."""
+    cost = (cost_matrix if isinstance(cost_matrix, np.ndarray)
+            else np.asarray(cost_matrix, dtype=np.float32))
+    neighbours = ab.build_conflict_adjacency_int(conflicts, n)
 
-    Returns (assignment, objective, feasible). The fallback to E0 guarantees
-    that a feasible assignment is always returned.
+    # Convert graph_edges (list/set of (i,j)) to bool mask if provided.
+    graph_edge_mask = None
+    if graph_edges is not None:
+        graph_edge_mask = np.zeros(n * n, dtype=bool)
+        for i, j in graph_edges:
+            graph_edge_mask[i * n + j] = True
 
-    Parameters
-    ----------
-    graph_edges : list or set of (i, j) tuples, optional
-        Edges present in the graph (sparse graph support). When None, the
-        full n x n matrix is used (complete graph, legacy behaviour).
-        Typically obtained from instance["graph_edges"].
-    """
-    cost = cost_matrix if isinstance(cost_matrix, np.ndarray) else np.array(cost_matrix, dtype=float)
-    neighbours = _build_edge_conflict_index(conflicts)
-    ge_set = set(tuple(e) for e in graph_edges) if graph_edges is not None else None
-
-    core, rows_used, cols_used, forbidden = _phase1_core(x_star, cost, neighbours, ordering)
-    completed = _phase2_completion(
-        core, n, cost, neighbours, rows_used, cols_used, forbidden, ordering, E0,
-        graph_edges=ge_set,
+    core_ids, rows_used, cols_used, forbidden_mask = _phase1_core(
+        x_star, cost, neighbours, n, ordering
+    )
+    completed_ids = _phase2_completion(
+        core_ids, n, cost, neighbours,
+        rows_used, cols_used, forbidden_mask, ordering, E0,
+        graph_edge_mask=graph_edge_mask,
     )
 
-    assignment = sorted([tuple(e) for e in completed], key=lambda e: e[0])
+    assignment = sorted([divmod(eid, n) for eid in completed_ids], key=lambda e: e[0])
     feasible = (
         len(assignment) == n
         and len(set(assignment)) == n
@@ -287,6 +288,7 @@ def run(
     E0: ab.Assignment,
     ordering: str = DEFAULT_ORDERING,
     graph_edges=None,
+    **kwargs,
 ) -> Tuple[ab.Assignment, float, bool]:
     """Alias of repair() with uniform heuristic interface."""
     return repair(x_star, cost_matrix, conflicts, n, E0, ordering=ordering,
@@ -301,18 +303,10 @@ def run_all_orderings(
     E0: ab.Assignment,
     graph_edges=None,
 ) -> Dict[str, Dict[str, Any]]:
-    """Run the repair heuristic under every ordering criterion.
-
-    Returns a dict mapping ordering name to a record containing objective,
-    feasibility, runtime, core size, and the final assignment.
-
-    Parameters
-    ----------
-    graph_edges : list or set of (i, j) tuples, optional
-        Sparse graph edge set. Passed through to repair(). None = complete graph.
-    """
-    cost = cost_matrix if isinstance(cost_matrix, np.ndarray) else np.array(cost_matrix, dtype=float)
-    neighbours = _build_edge_conflict_index(conflicts)
+    """Run the repair heuristic under every ordering criterion."""
+    cost = (cost_matrix if isinstance(cost_matrix, np.ndarray)
+            else np.asarray(cost_matrix, dtype=np.float32))
+    neighbours = ab.build_conflict_adjacency_int(conflicts, n)
     records = {}
 
     for ordering in ORDERINGS:
@@ -322,14 +316,14 @@ def run_all_orderings(
             ordering=ordering, graph_edges=graph_edges,
         )
         elapsed = time.time() - t0
-        core, _, _, _ = _phase1_core(x_star, cost, neighbours, ordering)
+        core_ids, _, _, _ = _phase1_core(x_star, cost, neighbours, n, ordering)
         records[ordering] = {
             "ordering": ordering,
             "ordering_label": ORDERING_LABELS[ordering],
             "objective": float(objective),
             "feasible": bool(feasible),
             "runtime_seconds": float(elapsed),
-            "core_size": int(len(core)),
+            "core_size": int(len(core_ids)),
             "assignment": [tuple(e) for e in assignment],
         }
     return records

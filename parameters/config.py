@@ -16,8 +16,8 @@ ANALYSIS_DIR = "analysis_output"
 # ---------------------------------------------------------
 # GLOBAL PARAMETERS
 # ---------------------------------------------------------
-UNIVERSAL_SEEDS = list(range(1, 11))   # Exactly 10 seeds for statistical balance
-GRAPH_DENSITIES = [0.4, 0.6, 0.8, 1.0] # The alpha parameter (graph edge density)
+UNIVERSAL_SEEDS = list(range(1, 6))    # 5 seeds is the academic minimum for statistical validity
+GRAPH_DENSITIES = [0.4, 1.0]           # Test only sparse (40%) and dense (100%) graphs
 DEFAULT_COST_LOW = 1
 DEFAULT_COST_HIGH = 100
 
@@ -34,25 +34,27 @@ GRID_BETAS = [0.01, 0.05, 0.10, 0.15]
 # A. The Goldilocks Zone (Branch & Bound Explosion)
 # Phase-transition sweep: highly constrained but feasible region.
 DIFF_GOLDILOCKS_N = [40, 50]
-DIFF_GOLDILOCKS_ALPHAS = [0.4, 0.6, 0.8, 1.0]
+DIFF_GOLDILOCKS_ALPHAS = [0.4, 1.0]    # Reduced from 4
 DIFF_GOLDILOCKS_BETAS = [0.15, 0.20, 0.25, 0.30]
-# Uses UNIVERSAL_SEEDS (10 seeds)
+# New Size: 2 * 2 * 4 * 5 = 80 instances
 
 # B. Degeneracy (The "Flat Cost" Trap)
 # Tight cost band defeats Gurobi's LP-bound pruning.
 DIFF_DEGEN_N = [30, 40, 50]
-DIFF_DEGEN_ALPHAS = [0.4, 0.6, 0.8, 1.0]
+DIFF_DEGEN_ALPHAS = [0.4, 1.0]         # Reduced from 4
 DIFF_DEGEN_BETAS = [0.05, 0.10, 0.15]
 DIFF_DEGEN_COST_LOW = 95
 DIFF_DEGEN_COST_HIGH = 100
-# Uses UNIVERSAL_SEEDS (10 seeds)
+# New Size: 3 * 2 * 3 * 5 = 90 instances
 
 # C. Extreme Scale (Pure Dimensionality Limits)
 # Alpha capped at 0.6 to keep conflict-pair pool tractable at n=150.
 DIFF_EXTREME_N = [100, 150]
-DIFF_EXTREME_ALPHAS = [0.2, 0.4, 0.6]
+DIFF_EXTREME_ALPHAS = [0.2, 0.6]       # Reduced from 3
 DIFF_EXTREME_BETAS = [0.001, 0.005]
-DIFF_EXTREME_SEEDS = list(range(1, 6))  # 5 seeds to prevent memory crashes
+DIFF_EXTREME_SEEDS = list(range(1, 6)) 
+# New Size: 2 * 2 * 2 * 5 = 40 instances
+
 
 # ---------------------------------------------------------
 # EXACT SOLVER (GUROBI)

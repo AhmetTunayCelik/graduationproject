@@ -8,6 +8,7 @@ Parameter-sweep runner for large-scale MAX-APC experiments.
 from __future__ import annotations
 
 import argparse
+import gc
 import importlib
 import os
 import sys
@@ -140,6 +141,12 @@ def run_single_combination(
 
     ab.save_result(instance, heuristic_name, result_payload, directory=result_dir, subgradient_output=subg)
 
+    # Free large in-memory data (subgradient buffers, conflict adjacency, etc.)
+    # before the next heuristic-instance pair to prevent OS-level swapping under
+    # accumulated garbage when running long batches.
+    del subg, x_star, result_payload
+    gc.collect()
+
     return True
 
 
@@ -153,7 +160,13 @@ def main():
     parser.add_argument("--result-dir", default="results", help="Directory for heuristic result JSONs")
     parser.add_argument("--force-heuristic", action="store_true", help="Rerun heuristic even if result exists")
     parser.add_argument("--quiet", action="store_true", help="Suppress progress output")
+    parser.add_argument("--tracemalloc", action="store_true",
+                        help="Enable tracemalloc and print top-10 memory hotspots at the end")
     args = parser.parse_args()
+
+    if args.tracemalloc:
+        import tracemalloc
+        tracemalloc.start()
 
     available = discover_heuristics()
     if args.list_heuristics:
@@ -205,6 +218,15 @@ def main():
                 print(f"  [{total_heuristic_calls}] {instance_name:40s} → {status}")
 
     print(f"\nBatch finished. Saved {saved} new results (out of {total_heuristic_calls} calls).")
+
+    if args.tracemalloc:
+        import tracemalloc
+        snapshot = tracemalloc.take_snapshot()
+        top_stats = snapshot.statistics("lineno")
+        print("\n[tracemalloc] Top 10 memory hotspots:")
+        for stat in top_stats[:10]:
+            print(f"  {stat}")
+        tracemalloc.stop()
 
 
 if __name__ == "__main__":
