@@ -270,11 +270,11 @@ def save_result(
     if subgradient_output is not None:
         # "LB" exists in live subgradient_solve() output and new-format cache.
         # "subgradient_LB" is the key batch_experiment uses in result_payload.
-        incumbent_obj = float(
-            subgradient_output.get("LB")
-            or subgradient_output.get("subgradient_LB")
-            or 0.0
-        )
+        # LB may be None when no feasible solution beyond E0 was found.
+        lb_val = (subgradient_output.get("LB")
+                  if subgradient_output.get("LB") is not None
+                  else subgradient_output.get("subgradient_LB"))
+        incumbent_obj = float(lb_val) if lb_val is not None else None
         raw_asgn = (
             subgradient_output.get("x_LB")
             or subgradient_output.get("incumbent_assignment")
@@ -363,12 +363,15 @@ def subgradient_solve(
     Returns
     -------
     dict
-        Contains: LB, UB, gap_pct, x_LB, x_star_final, iterations,
-        lambdas_final, runtime_seconds, terminated_reason, iteration_history.
+        Contains: LB (or None), UB, gap_pct (or None), feasible_found, x_LB (or None),
+        x_star_final, iterations, lambdas_final, runtime_seconds, terminated_reason,
+        iteration_history.
 
+        LB, x_LB, and gap_pct are None when no feasible solution beyond E0 is found
+        during time/iteration-limited runs (to prevent artificial 0s in analysis).
+        feasible_found is True only when LB strictly improves in the loop.
         iteration_history is a list of per-iteration dicts with keys
-        {iter, LB, UB, pi_k, num_violations, elapsed_s} for plotting
-        bound convergence.
+        {iter, LB, UB, pi_k, num_violations, elapsed_s} for plotting bound convergence.
     """
     n = instance["n"]
     # Downcast to float32: precision is plenty for subgradient ascent and halves memory.
@@ -385,6 +388,9 @@ def subgradient_solve(
     # Initialise LB with E0 (cost = 0 by construction)
     LB = float(sum(cost[i, j] for i, j in E0))
     x_LB = list(E0)
+    # True only when a real feasible solution better than E0 is found in the loop.
+    # Stays False if the run exits on time/iteration limit with only E0 as fallback.
+    feasible_found = False
 
     # Initial UB: unconstrained assignment optimum (valid upper bound)
     _, z0 = hungarian_max(cost)
@@ -473,6 +479,7 @@ def subgradient_solve(
                 if obj > LB:
                     LB = obj
                     x_LB = list(x_star)
+                    feasible_found = True
                 if verbose:
                     print(f"  Iter {k}: feasible & complementary slackness → optimum")
                 terminated_reason = "complementary_slackness"
@@ -482,6 +489,7 @@ def subgradient_solve(
             if obj > LB:
                 LB = obj
                 x_LB = list(x_star)
+                feasible_found = True
                 t_no_improve = 0
             else:
                 t_no_improve += 1
@@ -496,6 +504,7 @@ def subgradient_solve(
                 if feasible and z_hat > LB:
                     LB = float(z_hat)
                     x_LB = list(x_hat)
+                    feasible_found = True
                     t_no_improve = 0
                 else:
                     t_no_improve += 1
@@ -534,18 +543,32 @@ def subgradient_solve(
         _record_iter()
 
     runtime = time.time() - t_start
-    gap_pct = ((UB - LB) / max(abs(LB), 1e-10)) * 100.0
+
+    # If only E0 was ever available, report None so downstream analysis
+    # excludes these runs from objective averages rather than pulling them to 0.
+    if feasible_found:
+        lb_out = float(LB)
+        x_lb_out = [tuple(e) for e in x_LB]
+        gap_pct = ((UB - LB) / max(abs(LB), 1e-10)) * 100.0
+    else:
+        lb_out = None
+        x_lb_out = None
+        gap_pct = None
 
     if verbose:
         print(f"\n  Termination: {terminated_reason}")
-        print(f"  Final LB = {LB:.2f}, UB = {UB:.2f}, gap = {gap_pct:.2f}%")
+        if feasible_found:
+            print(f"  Final LB = {LB:.2f}, UB = {UB:.2f}, gap = {gap_pct:.2f}%")
+        else:
+            print(f"  No feasible solution found beyond E0 (UB = {UB:.2f})")
         print(f"  Runtime = {runtime:.3f} s over {k} iterations")
 
     return {
-        "LB": float(LB),
+        "LB": lb_out,
         "UB": float(UB),
-        "gap_pct": float(gap_pct),
-        "x_LB": [tuple(e) for e in x_LB],
+        "gap_pct": gap_pct,
+        "feasible_found": feasible_found,
+        "x_LB": x_lb_out,
         "x_star_final": [tuple(e) for e in x_star],
         "iterations": int(k),
         "lambdas_final": [float(v) for v in lambdas],

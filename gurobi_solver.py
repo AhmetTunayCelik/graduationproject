@@ -56,10 +56,10 @@ def solve_instance(
     dict
         Contains:
             'status' : str (e.g., "OPTIMAL", "TIME_LIMIT", "INFEASIBLE")
-            'objective' : float (optimal objective, or None if not optimal)
-            'assignment' : list of (i, j) (optimal assignment, or None)
+            'objective' : float or None (optimal/best objective, or None if no feasible found)
+            'assignment' : list of (i, j) or None (optimal/best assignment, or None if no feasible found)
             'runtime' : float (solver wall-clock time)
-            'gap' : float (relative MIP gap, if not optimal)
+            'gap' : float or None (relative MIP gap if solution found, None otherwise)
     """
     n = instance["n"]
     cost = instance["cost_matrix"]
@@ -120,12 +120,12 @@ def solve_instance(
             gap = model.MIPGap if hasattr(model, "MIPGap") else None
         else:
             # Timed out before finding any feasible solution.
-            assignment = []
-            obj_val = 0.0
-            gap = float("inf")
+            assignment = None
+            obj_val = None
+            gap = None
         return {
             "status": "TIME_LIMIT",
-            "objective": float(obj_val),
+            "objective": float(obj_val) if obj_val is not None else None,
             "assignment": assignment,
             "runtime": runtime,
             "gap": gap,

@@ -9,10 +9,10 @@ random seeds.
 Grid dimensions:
     n      : GRID_N           = [20, 30, 40, 50]
     beta   : GRID_BETAS       = [0.01, 0.05, 0.10, 0.15]
-    alpha  : GRAPH_DENSITIES  = [0.4, 0.6, 0.8, 1.0]
-    seeds  : UNIVERSAL_SEEDS  = 10 seeds
+    alpha  : GRAPH_DENSITIES  = [0.4, 1.0]
+    seeds  : UNIVERSAL_SEEDS  = [1, 2, 3, 4, 5]
 
-Total: 4 * 4 * 4 * 10 = 640 instances
+Total: 4 * 4 * 2 * 5 = 160 instances
 """
 
 from instance_generator import generate_batch
