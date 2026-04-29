@@ -280,6 +280,12 @@ def save_result(
             or subgradient_output.get("incumbent_assignment")
         )
         incumbent_asgn = _jsonify(raw_asgn) if raw_asgn else None
+        # Explicit failure flag for academic-integrity reporting in analysis.py.
+        # Falls back to "is the incumbent something" if the field is absent
+        # (e.g., a legacy cache from before feasible_found was tracked).
+        feasible_found = bool(
+            subgradient_output.get("feasible_found", incumbent_obj is not None)
+        )
     else:
         # Fallback: scan heuristic_output for best feasible ordering
         ordering_variants = (
@@ -292,6 +298,7 @@ def save_result(
                 best_asgn = rec["assignment"]
         incumbent_obj = best_obj
         incumbent_asgn = best_asgn
+        feasible_found = incumbent_obj is not None
 
     payload = {
         "n": instance["n"],
@@ -301,6 +308,7 @@ def save_result(
         "heuristic": heuristic_name,
         "incumbent_objective": incumbent_obj,
         "incumbent_assignment": incumbent_asgn,
+        "feasible_found": feasible_found,
         **_jsonify(result),
     }
     with open(fpath, "w") as f:
