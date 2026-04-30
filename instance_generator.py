@@ -260,6 +260,20 @@ def generate_instance(
     else:
         eff_conflict_density = 0.0
 
+# --- ISSUE C FIX: Mask non-graph edges so Gurobi & Subgradient respect sparsity ---
+    PENALTY = -999999.0
+
+    # We MUST include E0 edges to ensure the baseline remains strictly feasible
+    valid_edges = set(tuple(e) for e in graph_edges)
+    valid_edges.update(tuple(e) for e in E0)
+
+    # Poison the non-graph edges in the cost matrix
+    for i in range(n):
+        for j in range(n):
+            if (i, j) not in valid_edges:
+                cost_matrix[i][j] = PENALTY
+# ----------------------------------------------------------------------------------
+
     return {
         "n": n,
         "cost_matrix": cost_matrix,
