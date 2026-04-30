@@ -58,8 +58,10 @@ def solve_instance(
             'status' : str (e.g., "OPTIMAL", "TIME_LIMIT", "INFEASIBLE")
             'objective' : float or None (optimal/best objective, or None if no feasible found)
             'assignment' : list of (i, j) or None (optimal/best assignment, or None if no feasible found)
-            'runtime' : float (solver wall-clock time)
+            'runtime' : float (solver wall-clock time in seconds)
             'gap' : float or None (relative MIP gap if solution found, None otherwise)
+            'nodes_explored' : int (number of B&B nodes explored; explains search difficulty)
+            'solutions_found' : int (number of distinct feasible solutions found; 0 means timeout-without-incumbent)
     """
     n = instance["n"]
     cost = instance["cost_matrix"]
@@ -111,6 +113,8 @@ def solve_instance(
             "assignment": assignment,
             "runtime": runtime,
             "gap": 0.0,
+            "nodes_explored": int(model.NodeCount),
+            "solutions_found": int(model.SolCount),
         }
     elif status == GRB.TIME_LIMIT:
         if model.SolCount > 0:
@@ -129,6 +133,8 @@ def solve_instance(
             "assignment": assignment,
             "runtime": runtime,
             "gap": gap,
+            "nodes_explored": int(model.NodeCount),
+            "solutions_found": int(model.SolCount),
         }
     elif status == GRB.INFEASIBLE:
         return {

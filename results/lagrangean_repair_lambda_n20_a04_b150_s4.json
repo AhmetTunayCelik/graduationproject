@@ -1,0 +1,406 @@
+{
+  "n": 20,
+  "seed": 4,
+  "num_conflicts": 1698,
+  "E0_objective": 0,
+  "heuristic": "lagrangean_repair_lambda",
+  "incumbent_objective": 1841.0,
+  "incumbent_assignment": [
+    [
+      0,
+      9
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      15
+    ],
+    [
+      3,
+      10
+    ],
+    [
+      4,
+      1
+    ],
+    [
+      5,
+      2
+    ],
+    [
+      6,
+      4
+    ],
+    [
+      7,
+      6
+    ],
+    [
+      8,
+      8
+    ],
+    [
+      9,
+      11
+    ],
+    [
+      10,
+      12
+    ],
+    [
+      11,
+      7
+    ],
+    [
+      12,
+      18
+    ],
+    [
+      13,
+      16
+    ],
+    [
+      14,
+      14
+    ],
+    [
+      15,
+      5
+    ],
+    [
+      16,
+      13
+    ],
+    [
+      17,
+      17
+    ],
+    [
+      18,
+      3
+    ],
+    [
+      19,
+      19
+    ]
+  ],
+  "feasible_found": true,
+  "subgradient_LB": 1841.0,
+  "subgradient_UB": 1841.0,
+  "subgradient_iterations": 4,
+  "subgradient_runtime": 0.009176969528198242,
+  "subgradient_terminated_reason": "complementary_slackness",
+  "subgradient_history": [
+    {
+      "iter": 1,
+      "LB": 0.0,
+      "UB": 1846.0,
+      "pi_k": 2.0,
+      "num_violations": 1,
+      "elapsed_s": 0.0023975372314453125
+    },
+    {
+      "iter": 2,
+      "LB": 0.0,
+      "UB": 1843.7238035202026,
+      "pi_k": 2.0,
+      "num_violations": 1,
+      "elapsed_s": 0.005150318145751953
+    },
+    {
+      "iter": 3,
+      "LB": 0.0,
+      "UB": 1841.450400352478,
+      "pi_k": 2.0,
+      "num_violations": 1,
+      "elapsed_s": 0.009065866470336914
+    },
+    {
+      "iter": 4,
+      "LB": 1841.0,
+      "UB": 1841.0,
+      "pi_k": 2.0,
+      "num_violations": 0,
+      "elapsed_s": 0.009176492691040039
+    }
+  ],
+  "heuristic_name": "lagrangean_repair_lambda",
+  "heuristic_output": {
+    "ordering_variants": {
+      "lambda_penalized_weight": {
+        "ordering": "lambda_penalized_weight",
+        "ordering_label": "Weight - mu*lambda_sum",
+        "objective": 0.0,
+        "feasible": true,
+        "runtime_seconds": 0.0025587081909179688,
+        "core_size": 20,
+        "assignment": [
+          [
+            0,
+            17
+          ],
+          [
+            1,
+            19
+          ],
+          [
+            2,
+            10
+          ],
+          [
+            3,
+            14
+          ],
+          [
+            4,
+            5
+          ],
+          [
+            5,
+            18
+          ],
+          [
+            6,
+            16
+          ],
+          [
+            7,
+            11
+          ],
+          [
+            8,
+            4
+          ],
+          [
+            9,
+            8
+          ],
+          [
+            10,
+            6
+          ],
+          [
+            11,
+            0
+          ],
+          [
+            12,
+            13
+          ],
+          [
+            13,
+            1
+          ],
+          [
+            14,
+            2
+          ],
+          [
+            15,
+            15
+          ],
+          [
+            16,
+            12
+          ],
+          [
+            17,
+            3
+          ],
+          [
+            18,
+            9
+          ],
+          [
+            19,
+            7
+          ]
+        ]
+      },
+      "lambda_weight_over_degree": {
+        "ordering": "lambda_weight_over_degree",
+        "ordering_label": "Weight / (1 + degree + mu*lambda_sum)",
+        "objective": 0.0,
+        "feasible": true,
+        "runtime_seconds": 0.0015442371368408203,
+        "core_size": 20,
+        "assignment": [
+          [
+            0,
+            17
+          ],
+          [
+            1,
+            19
+          ],
+          [
+            2,
+            10
+          ],
+          [
+            3,
+            14
+          ],
+          [
+            4,
+            5
+          ],
+          [
+            5,
+            18
+          ],
+          [
+            6,
+            16
+          ],
+          [
+            7,
+            11
+          ],
+          [
+            8,
+            4
+          ],
+          [
+            9,
+            8
+          ],
+          [
+            10,
+            6
+          ],
+          [
+            11,
+            0
+          ],
+          [
+            12,
+            13
+          ],
+          [
+            13,
+            1
+          ],
+          [
+            14,
+            2
+          ],
+          [
+            15,
+            15
+          ],
+          [
+            16,
+            12
+          ],
+          [
+            17,
+            3
+          ],
+          [
+            18,
+            9
+          ],
+          [
+            19,
+            7
+          ]
+        ]
+      },
+      "lambda_over_degree_then_weight": {
+        "ordering": "lambda_over_degree_then_weight",
+        "ordering_label": "Increasing lambda+degree, tie by weight",
+        "objective": 0.0,
+        "feasible": true,
+        "runtime_seconds": 0.0015497207641601562,
+        "core_size": 20,
+        "assignment": [
+          [
+            0,
+            17
+          ],
+          [
+            1,
+            19
+          ],
+          [
+            2,
+            10
+          ],
+          [
+            3,
+            14
+          ],
+          [
+            4,
+            5
+          ],
+          [
+            5,
+            18
+          ],
+          [
+            6,
+            16
+          ],
+          [
+            7,
+            11
+          ],
+          [
+            8,
+            4
+          ],
+          [
+            9,
+            8
+          ],
+          [
+            10,
+            6
+          ],
+          [
+            11,
+            0
+          ],
+          [
+            12,
+            13
+          ],
+          [
+            13,
+            1
+          ],
+          [
+            14,
+            2
+          ],
+          [
+            15,
+            15
+          ],
+          [
+            16,
+            12
+          ],
+          [
+            17,
+            3
+          ],
+          [
+            18,
+            9
+          ],
+          [
+            19,
+            7
+          ]
+        ]
+      }
+    },
+    "runtime_seconds": 0.007397651672363281
+  }
+}

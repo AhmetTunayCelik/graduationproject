@@ -239,14 +239,23 @@ def _heur_runtime_total(data: Dict) -> Optional[float]:
     return float(sum(parts))
 
 
-def _gurobi_objective(data: Dict) -> Tuple[Optional[float], str, Optional[float]]:
-    """Best objective Gurobi found, status, gap. None if no incumbent."""
+def _gurobi_objective(data: Dict) -> Tuple[Optional[float], str, Optional[float], int, int]:
+    """Best objective Gurobi found, status, gap, nodes explored, solutions found.
+
+    nodes_explored  — B&B tree size; high values signal a weak LP relaxation.
+    solutions_found — 0 means timeout-without-incumbent (hardest case).
+    Both fields are absent in legacy JSONs and fall back to NaN / 0.
+    """
     status = data.get("status", "UNKNOWN")
     obj = data.get("objective")
     gap = data.get("gap")
-    if obj is None:
-        return None, status, None
-    return float(obj), status, (float(gap) if gap is not None else None)
+    nodes = data.get("nodes_explored")
+    sols  = data.get("solutions_found")
+    obj_out = float(obj) if obj is not None else None
+    gap_out = float(gap) if gap is not None else None
+    nodes_out = int(nodes) if nodes is not None else np.nan
+    sols_out  = int(sols)  if sols  is not None else np.nan
+    return obj_out, status, gap_out, nodes_out, sols_out
 
 
 def load_master(results_dir: str = "results") -> pd.DataFrame:
@@ -268,19 +277,21 @@ def load_master(results_dir: str = "results") -> pd.DataFrame:
             continue
 
         if meta["kind"] == "optimal":
-            obj, status, gap = _gurobi_objective(data)
+            obj, status, gap, nodes, sols = _gurobi_objective(data)
             optimal_records.append({
                 **meta,
-                "objective":      obj,
-                "status":         status,
-                "runtime_total":  float(data.get("runtime", np.nan)) if data.get("runtime") is not None else np.nan,
-                "gap_solver":     gap,
-                "feasible":       obj is not None,
+                "objective":           obj,
+                "status":              status,
+                "runtime_total":       float(data.get("runtime", np.nan)) if data.get("runtime") is not None else np.nan,
+                "gap_solver":          gap,
+                "feasible":            obj is not None,
                 # Bounds: for Gurobi we treat the optimum (or best incumbent) as both LB and UB.
-                "LB":             obj,
-                "UB":             obj,
-                "iter_count":     np.nan,
+                "LB":                  obj,
+                "UB":                  obj,
+                "iter_count":          np.nan,
                 "first_feasible_time": np.nan,
+                "nodes_explored":      nodes,
+                "solutions_found":     sols,
             })
             continue
 
@@ -304,6 +315,9 @@ def load_master(results_dir: str = "results") -> pd.DataFrame:
             "iter_count":         int(data.get("subgradient_iterations", 0) or 0),
             "first_feasible_time": first_t,
             "terminated_reason":  data.get("subgradient_terminated_reason"),
+            # Gurobi-specific fields — NaN for heuristic rows.
+            "nodes_explored":     np.nan,
+            "solutions_found":    np.nan,
         })
 
     df = pd.DataFrame(heuristic_records + optimal_records)
@@ -312,7 +326,7 @@ def load_master(results_dir: str = "results") -> pd.DataFrame:
         return df
 
     # Type coercion.
-    for col in ("n", "seed", "iter_count"):
+    for col in ("n", "seed", "iter_count", "nodes_explored", "solutions_found"):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
     for col in ("alpha", "beta", "objective", "runtime_total", "gap_solver",
@@ -616,6 +630,33 @@ def table_wilcoxon_pairwise(df: pd.DataFrame) -> pd.DataFrame:
                 "significant_at_0.05":  bool(p is not None and not np.isnan(p) and p < 0.05),
             })
     return pd.DataFrame(rows).round(5)
+
+
+def table_gurobi_difficulty(df: pd.DataFrame) -> pd.DataFrame:
+    """Per-instance Gurobi difficulty metrics: nodes explored, solutions found, gap.
+
+    Rows where nodes_explored is NaN are legacy results that pre-date the
+    nodes_explored / solutions_found fields in gurobi_solver.py — they are
+    included with those columns blank so the objective / gap columns still
+    contribute to the table.
+
+    Useful for the thesis narrative:
+      - High nodes_explored + high gap  → weak LP relaxation (e.g. a10_b100).
+      - solutions_found == 0            → Gurobi timed out before any incumbent.
+    """
+    gurobi = df[df["algo"] == GUROBI_LABEL].copy()
+    if gurobi.empty:
+        return pd.DataFrame()
+    cols = ["category", "n", "alpha", "beta", "seed",
+            "status", "objective", "gap_solver",
+            "nodes_explored", "solutions_found", "runtime_total"]
+    out = gurobi[[c for c in cols if c in gurobi.columns]].copy()
+    out["category"] = out["category"].map(_CATEGORY_DISPLAY).fillna(out["category"])
+    out = out.sort_values(["category", "n", "alpha", "beta", "seed"]).reset_index(drop=True)
+    for col in ("objective", "gap_solver", "runtime_total"):
+        if col in out.columns:
+            out[col] = out[col].round(4)
+    return out
 
 
 # =============================================================================
@@ -980,6 +1021,11 @@ def main() -> None:
         wilcoxon = _safe("wilcoxon_pairwise", table_wilcoxon_pairwise, df)
         _export_table(wilcoxon, "wilcoxon_pairwise", tables_dir,
                       caption="Pairwise Wilcoxon signed-rank tests on paired true gaps.",
+                      excel_writer=writer)
+
+        gurobi_diff = _safe("gurobi_difficulty", table_gurobi_difficulty, df)
+        _export_table(gurobi_diff, "gurobi_difficulty", tables_dir,
+                      caption="Gurobi per-instance difficulty: nodes explored, solutions found, gap.",
                       excel_writer=writer)
 
     print(f"  Saved {excel_path}")
