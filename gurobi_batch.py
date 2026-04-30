@@ -23,6 +23,10 @@ def main():
     result_dir = config.RESULTS_DIR
     os.makedirs(result_dir, exist_ok=True)
 
+    # Reproducibility appendix: log host + library + config state once per batch.
+    meta_path = ab.write_run_metadata(result_dir, batch_label="gurobi")
+    print(f"Run metadata written to {meta_path}")
+
     instance_paths = glob.glob(os.path.join(instance_dir, "instance_*.json"))
     if not instance_paths:
         print("No instance files found.")
@@ -40,12 +44,14 @@ def main():
 
         print(f"Solving {base_name}...")
         instance = ab.load_instance(fpath)
-        
+
         # Pull timeout limit directly from config
         result = solve_instance(instance, time_limit=config.GUROBI_TIME_LIMIT, verbose=False)
 
-        with open(opt_path, "w") as f:
-            json.dump(result, f, indent=2)
+        # Atomic write: prevents truncated/empty result files if the process is
+        # killed mid-write (which would otherwise cause skip-if-exists logic to
+        # permanently orphan that cell of the experiment).
+        ab._atomic_write_json(opt_path, result)
 
         solved += 1
         print(f"  Status: {result['status']}, Objective: {result['objective']}")

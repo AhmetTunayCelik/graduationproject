@@ -178,6 +178,20 @@ def generate_instance(
     #
     # Threshold: |E(G)| <= 1600 means the pool has at most ~1.3M pairs
     # (~150 MB), which builds quickly. For alpha=1 this covers n <= 40.
+    #
+    # Note on `beta` semantics across the boundary
+    # --------------------------------------------
+    # For the small-graph branch, beta is mathematically exact against the
+    # *true* valid pool (filtered by row/col disjointness and E0-vs-E0
+    # exclusion). For the large-graph branch we use the cheaper upper bound
+    # |E(G)|*(|E(G)|-1)/2 as the denominator — a slight asymmetry.
+    # Effect: at the same nominal beta value, the large-graph instances
+    # actually request slightly *more* conflicts than the formula would
+    # imply against the strict pool. Acceptable because (a) at large n the
+    # filtered fraction stays close to 1 (most random pairs are row/col-
+    # disjoint), and (b) the experimental design uses small beta values at
+    # large n precisely to keep memory tractable. Reviewers should be
+    # alerted to this in the methodology section.
     # ------------------------------------------------------------------
     POOL_EDGE_LIMIT = 1600
 

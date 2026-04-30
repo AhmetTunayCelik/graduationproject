@@ -69,6 +69,8 @@ def main():
                 instance["conflicts"],
                 instance["n"],
                 instance["E0"],
+                lambdas=subg.get("lambdas_final"),
+                graph_edges=instance.get("graph_edges"),
             )
             elapsed = time.time() - t0
             result_payload = {
@@ -92,6 +94,7 @@ def main():
                     instance["n"],
                     instance["E0"],
                     lambdas=subg.get("lambdas_final"),
+                    graph_edges=instance.get("graph_edges"),
                 )
             except TypeError:
                 assignment, obj, feasible = hrun(

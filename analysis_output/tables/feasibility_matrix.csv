@@ -1,2 +1,2 @@
-index,Gurobi,lagrangean_repair_lambda
-Standard,100.000,100.000
+index,greedy_baseline,lagrangean_repair_lambda
+Standard,20.000,100.000

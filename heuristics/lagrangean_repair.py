@@ -302,6 +302,7 @@ def run_all_orderings(
     n: int,
     E0: ab.Assignment,
     graph_edges=None,
+    **kwargs,   # absorb lambdas/mu when invoked from lambda-aware paths
 ) -> Dict[str, Dict[str, Any]]:
     """Run the repair heuristic under every ordering criterion."""
     cost = (cost_matrix if isinstance(cost_matrix, np.ndarray)

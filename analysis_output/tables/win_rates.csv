@@ -1,2 +1,3 @@
 Algorithm,Best_LB_wins,Best_LB_pct,Fastest_feasible_wins,Fastest_feasible_pct,instances
-lagrangean_repair_lambda,25,100.000,25,100.000,25
+lagrangean_repair_lambda,10,100.000,10,100.000,10
+greedy_baseline,0,0.000,0,0.000,10

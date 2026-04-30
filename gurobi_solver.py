@@ -31,6 +31,7 @@ import gurobipy as gp
 from gurobipy import GRB
 
 import apc_base as ab  # for loading instances and type definitions
+from parameters import config
 
 
 def solve_instance(
@@ -69,7 +70,9 @@ def solve_instance(
 
     model = gp.Model("MAX-APC")
     if not verbose:
-        model.setParam("OutputFlag", 0)
+        model.setParam("OutputFlag", config.GUROBI_OUTPUT_FLAG)
+    # Pinned thread count → fair runtime comparison vs single-threaded heuristics.
+    model.setParam("Threads", config.GUROBI_THREADS)
     if time_limit is not None:
         model.setParam("TimeLimit", time_limit)
 

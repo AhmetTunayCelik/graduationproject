@@ -61,7 +61,10 @@ DIFF_EXTREME_SEEDS = list(range(1, 6))
 # ---------------------------------------------------------
 GUROBI_TIME_LIMIT = 600.0     # 10 minutes maximum runtime
 HEURISTIC_TIME_LIMIT = 600.0  # 10 minutes maximum runtime (subgradient + repair)
-GUROBI_THREADS = 0         # 0 = use all available cores
+# Single-threaded for fair wall-clock comparison against single-threaded
+# heuristics. Gurobi's default is 0 (all cores), which would give it an
+# unfair advantage and make runtime claims indefensible.
+GUROBI_THREADS = 1
 GUROBI_OUTPUT_FLAG = 0     # 0 = quiet, 1 = verbose
 
 # ---------------------------------------------------------

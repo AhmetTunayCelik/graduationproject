@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import json
 import os
+import platform
+import sys
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -210,6 +212,82 @@ def _result_filename(instance: Instance, heuristic_name: str) -> str:
         return f"difficult_{heuristic_name}_{category}_{tags}.json"
 
 
+def _config_snapshot() -> Dict[str, Any]:
+    """Capture the public scalar/list attributes of parameters.config.
+
+    Saved into batch metadata for the reproducibility appendix.
+    """
+    snap: Dict[str, Any] = {}
+    for k in dir(config):
+        if k.startswith("_"):
+            continue
+        v = getattr(config, k)
+        if isinstance(v, (int, float, str, bool, list, tuple)) and not callable(v):
+            snap[k] = list(v) if isinstance(v, tuple) else v
+    return snap
+
+
+def write_run_metadata(directory: str, batch_label: str) -> str:
+    """Persist a `metadata_<label>.json` capturing host, library, and config
+    state at the start of a batch. Required for any reproducibility-grade
+    write-up.
+
+    Captures: timestamp, OS, CPU count, Python/numpy/scipy versions, Gurobi
+    version (best-effort import), and a flat snapshot of parameters.config.
+    """
+    os.makedirs(directory, exist_ok=True)
+    ts = time.strftime("%Y-%m-%dT%H:%M:%S")
+
+    try:
+        import scipy
+        scipy_ver = scipy.__version__
+    except Exception:
+        scipy_ver = "unknown"
+
+    try:
+        import gurobipy
+        gurobi_ver = ".".join(str(x) for x in gurobipy.gurobi.version())
+    except Exception:
+        gurobi_ver = "unavailable"
+
+    metadata = {
+        "batch_label": batch_label,
+        "timestamp": ts,
+        "host": {
+            "platform":   platform.platform(),
+            "machine":    platform.machine(),
+            "processor":  platform.processor(),
+            "cpu_count":  os.cpu_count(),
+            "python":     sys.version.split()[0],
+        },
+        "libraries": {
+            "numpy":  np.__version__,
+            "scipy":  scipy_ver,
+            "gurobi": gurobi_ver,
+        },
+        "config": _config_snapshot(),
+    }
+
+    fpath = os.path.join(directory, f"metadata_{batch_label}.json")
+    _atomic_write_json(fpath, metadata)
+    return fpath
+
+
+def _atomic_write_json(fpath: str, payload: Any, indent: int = 2) -> None:
+    """Write a JSON payload atomically.
+
+    Why: a process kill mid-`json.dump` leaves an empty/truncated file at the
+    destination path. Skip-if-exists logic (in gurobi_batch / batch_experiment)
+    then permanently treats that cell as 'already solved'. Writing to a .tmp
+    sibling and renaming guarantees the destination either contains the full
+    JSON or doesn't exist.
+    """
+    tmp = fpath + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(payload, f, indent=indent)
+    os.replace(tmp, fpath)
+
+
 def save_instance(instance: Instance, directory: str = "instances") -> str:
     """Persist an instance to disk as JSON."""
     os.makedirs(directory, exist_ok=True)
@@ -218,9 +296,26 @@ def save_instance(instance: Instance, directory: str = "instances") -> str:
     payload["E0"] = [list(e) for e in instance["E0"]]
     if "graph_edges" in payload:
         payload["graph_edges"] = [list(e) for e in instance["graph_edges"]]
-    with open(fpath, "w") as f:
-        json.dump(payload, f, indent=2)
+    _atomic_write_json(fpath, payload)
     return fpath
+
+
+def _validate_E0(instance: Instance) -> None:
+    """Light sanity check that the seed assignment is a valid permutation and
+    conflict-free. Issues a warning (does not raise) so legacy or hand-crafted
+    instances still load."""
+    n = instance["n"]
+    E0 = instance["E0"]
+    rows = {i for i, _ in E0}
+    cols = {j for _, j in E0}
+    if len(E0) != n or len(rows) != n or len(cols) != n:
+        print(f"  [Warning] E0 in instance is not a valid n-permutation "
+              f"(|E0|={len(E0)}, rows={len(rows)}, cols={len(cols)})")
+        return
+    violations = find_violations(E0, instance.get("conflicts", []), n)
+    if violations:
+        print(f"  [Warning] E0 in instance violates {len(violations)} "
+              f"conflict pair(s); the seed feasible solution is not feasible.")
 
 
 def load_instance(fpath: str) -> Instance:
@@ -238,6 +333,7 @@ def load_instance(fpath: str) -> Instance:
     if "graph_edges" not in instance:
         n = instance["n"]
         instance["graph_edges"] = [(i, j) for i in range(n) for j in range(n)]
+    _validate_E0(instance)
     return instance
 
 
@@ -268,21 +364,13 @@ def save_result(
     # If subgradient_output is not supplied we fall back to the best feasible
     # variant found among the heuristic's own ordering results.
     if subgradient_output is not None:
-        # "LB" exists in live subgradient_solve() output and new-format cache.
-        # "subgradient_LB" is the key batch_experiment uses in result_payload.
-        # LB may be None when no feasible solution beyond E0 was found.
-        lb_val = (subgradient_output.get("LB")
-                  if subgradient_output.get("LB") is not None
-                  else subgradient_output.get("subgradient_LB"))
+        # `LB` is None when the loop found no feasible solution beyond E0.
+        lb_val = subgradient_output.get("LB")
         incumbent_obj = float(lb_val) if lb_val is not None else None
-        raw_asgn = (
-            subgradient_output.get("x_LB")
-            or subgradient_output.get("incumbent_assignment")
-        )
-        incumbent_asgn = _jsonify(raw_asgn) if raw_asgn else None
+        incumbent_asgn = _jsonify(subgradient_output.get("x_LB")) if subgradient_output.get("x_LB") else None
         # Explicit failure flag for academic-integrity reporting in analysis.py.
         # Falls back to "is the incumbent something" if the field is absent
-        # (e.g., a legacy cache from before feasible_found was tracked).
+        # (legacy result caches predating feasible_found tracking).
         feasible_found = bool(
             subgradient_output.get("feasible_found", incumbent_obj is not None)
         )
@@ -300,6 +388,30 @@ def save_result(
         incumbent_asgn = best_asgn
         feasible_found = incumbent_obj is not None
 
+    # Allow the *post-loop* heuristic call (run with converged lambdas) to
+    # update the incumbent if it strictly beats the best in-loop repair.
+    # This matters for lambda-aware heuristics whose dual information is
+    # only fully informative once the subgradient ascent has converged.
+    heur_out = result.get("heuristic_output", {}) or {}
+    candidate_assign: Optional[Any] = None
+    candidate_obj: Optional[float] = None
+    if "ordering_variants" in heur_out:
+        for variant in heur_out.get("ordering_variants", {}).values():
+            if variant.get("feasible") and variant.get("objective") is not None:
+                v_obj = float(variant["objective"])
+                if candidate_obj is None or v_obj > candidate_obj:
+                    candidate_obj = v_obj
+                    candidate_assign = variant.get("assignment")
+    elif heur_out.get("feasible") and heur_out.get("objective") is not None:
+        candidate_obj = float(heur_out["objective"])
+        candidate_assign = heur_out.get("assignment")
+
+    if candidate_obj is not None:
+        if incumbent_obj is None or candidate_obj > incumbent_obj:
+            incumbent_obj = candidate_obj
+            incumbent_asgn = _jsonify(candidate_assign) if candidate_assign else incumbent_asgn
+            feasible_found = True
+
     payload = {
         "n": instance["n"],
         "seed": instance["seed"],
@@ -311,8 +423,7 @@ def save_result(
         "feasible_found": feasible_found,
         **_jsonify(result),
     }
-    with open(fpath, "w") as f:
-        json.dump(payload, f, indent=2)
+    _atomic_write_json(fpath, payload)
     return fpath
 
 
@@ -387,6 +498,9 @@ def subgradient_solve(
     conflicts = instance["conflicts"]
     num_conflicts = len(conflicts)
     E0 = instance["E0"]
+    # Forwarded to repair heuristics so they restrict candidates to the
+    # underlying graph. None for legacy / complete-graph instances.
+    graph_edges = instance.get("graph_edges")
 
     if verbose:
         print(f"\n{'=' * 60}")
@@ -502,13 +616,27 @@ def subgradient_solve(
             else:
                 t_no_improve += 1
         else:
-            # Infeasible subproblem solution: try to repair
+            # Infeasible subproblem solution: try to repair.
+            # Pass current `lambdas` so lambda-aware heuristics can use the
+            # *evolving* dual signal (not just the converged final values),
+            # and `graph_edges` so the repair stays inside the underlying
+            # sparse graph for instances with alpha < 1.
             if repair_fn is not None:
                 try:
-                    x_hat, z_hat, feasible = repair_fn(x_star, cost, conflicts, n, E0)
+                    x_hat, z_hat, feasible = repair_fn(
+                        x_star, cost, conflicts, n, E0,
+                        lambdas=lambdas, graph_edges=graph_edges,
+                    )
                 except TypeError:
-                    # Compatibility with older signatures
-                    x_hat, z_hat, feasible = repair_fn(x_star, cost, conflicts, n)
+                    try:
+                        x_hat, z_hat, feasible = repair_fn(
+                            x_star, cost, conflicts, n, E0
+                        )
+                    except TypeError:
+                        # Oldest signature (no E0, no lambdas).
+                        x_hat, z_hat, feasible = repair_fn(
+                            x_star, cost, conflicts, n
+                        )
                 if feasible and z_hat > LB:
                     LB = float(z_hat)
                     x_LB = list(x_hat)
@@ -551,6 +679,12 @@ def subgradient_solve(
         _record_iter()
 
     runtime = time.time() - t_start
+
+    # Invariant: a valid Lagrangean relaxation must satisfy LB <= UB.
+    # Use a tolerance to absorb float32 roundoff in the penalty arithmetic.
+    if feasible_found and LB > UB + 1e-3 * max(abs(UB), 1.0):
+        print(f"  [Warning] LB ({LB:.4f}) exceeds UB ({UB:.4f}); "
+              f"likely a numerical issue or a bug in the repair heuristic.")
 
     # If only E0 was ever available, report None so downstream analysis
     # excludes these runs from objective averages rather than pulling them to 0.

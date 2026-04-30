@@ -42,6 +42,13 @@ def discover_heuristics() -> Dict[str, Tuple[str, any]]:
     return discovered
 
 
+def _skip_subgradient(module) -> bool:
+    """A heuristic module can opt out of the Lagrangean loop by exporting
+    SKIP_SUBGRADIENT = True (see heuristics/greedy_baseline.py).
+    """
+    return bool(getattr(module, "SKIP_SUBGRADIENT", False))
+
+
 def enumerate_instances(
     instance_dir: str,
     n_values: Optional[List[int]] = None,
@@ -59,8 +66,13 @@ def enumerate_instances(
             inst = ab.load_instance(fpath)
             if n_values is not None and inst["n"] not in n_values:
                 continue
-            if densities is not None and inst["density"] not in densities:
-                continue
+            if densities is not None:
+                # Use the canonical conflict-density key; fall back to the
+                # legacy `density` alias for old instance files.
+                inst_beta = inst.get("conflict_graph_density",
+                                     inst.get("density"))
+                if inst_beta is None or inst_beta not in densities:
+                    continue
             instances.append(inst)
         except Exception:
             print(f"Warning: could not load {fpath}", file=sys.stderr)
@@ -92,6 +104,42 @@ def run_single_combination(
     n = instance["n"]
     E0 = instance["E0"]
 
+    # Baseline heuristics opt out of the subgradient loop by setting
+    # SKIP_SUBGRADIENT = True. They run standalone for control comparison.
+    if _skip_subgradient(heuristic_module):
+        t0 = time.time()
+        assignment, objective, feasible = heuristic_run(
+            None, cost, conflicts, n, E0,
+            graph_edges=instance.get("graph_edges"),
+        )
+        elapsed = time.time() - t0
+        result_payload = {
+            "subgradient_LB": None,
+            "subgradient_UB": None,
+            "subgradient_iterations": 0,
+            "subgradient_runtime": 0.0,
+            "subgradient_terminated_reason": "skipped_baseline",
+            "subgradient_history": [],
+            "heuristic_name": heuristic_name,
+            "heuristic_output": {
+                "assignment": assignment,
+                "objective": objective,
+                "feasible": bool(feasible),
+                "runtime_seconds": elapsed,
+            },
+        }
+        # Synthetic subgradient_output so save_result reports feasibility correctly.
+        synthetic_subg = {
+            "LB": float(objective) if feasible else None,
+            "x_LB": [tuple(e) for e in assignment] if feasible else None,
+            "feasible_found": bool(feasible),
+        }
+        ab.save_result(instance, heuristic_name, result_payload,
+                       directory=result_dir, subgradient_output=synthetic_subg)
+        del result_payload, synthetic_subg
+        gc.collect()
+        return True
+
     subg = ab.subgradient_solve(
         instance,
         repair_fn=heuristic_run,
@@ -111,11 +159,17 @@ def run_single_combination(
         "heuristic_name": heuristic_name,
     }
 
-    # Use run_all_orderings if available (for heuristics with ordering variants)
+    # Use run_all_orderings if available (for heuristics with ordering variants).
+    # Pass converged lambdas so lambda-aware orderings score with the dual
+    # signal, and graph_edges so candidate filtering respects the underlying
+    # graph on alpha<1 instances. Heuristics that don't consume these absorb
+    # them via **kwargs.
     if has_orderings:
         start_time = time.time()
         variants = heuristic_module.run_all_orderings(
-            x_star, cost, conflicts, n, E0
+            x_star, cost, conflicts, n, E0,
+            lambdas=subg.get("lambdas_final"),
+            graph_edges=instance.get("graph_edges"),
         )
         elapsed = time.time() - start_time
         result_payload["heuristic_output"] = {
@@ -127,7 +181,9 @@ def run_single_combination(
         start_time = time.time()
         try:
             assignment, objective, feasible = heuristic_run(
-                x_star, cost, conflicts, n, E0, lambdas=subg.get("lambdas_final")
+                x_star, cost, conflicts, n, E0,
+                lambdas=subg.get("lambdas_final"),
+                graph_edges=instance.get("graph_edges"),
             )
         except TypeError:
             assignment, objective, feasible = heuristic_run(x_star, cost, conflicts, n)
@@ -193,6 +249,11 @@ def main():
     if not instances:
         print(f"No instances found in {args.instance_dir}. Please run instance_generator.py first.")
         return
+
+    # Reproducibility appendix: log host + library + config state once per batch.
+    os.makedirs(args.result_dir, exist_ok=True)
+    meta_path = ab.write_run_metadata(args.result_dir, batch_label="heuristics")
+    print(f"Run metadata written to {meta_path}")
 
     total_heuristic_calls = 0
     saved = 0
