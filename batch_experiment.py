@@ -129,10 +129,12 @@ def run_single_combination(
             },
         }
         # Synthetic subgradient_output so save_result reports feasibility correctly.
+        e0_objective = sum(instance["cost_matrix"][i][j] for i, j in E0)
+        nontrivial = bool(feasible and objective > e0_objective + 1e-9)
         synthetic_subg = {
-            "LB": float(objective) if feasible else None,
-            "x_LB": [tuple(e) for e in assignment] if feasible else None,
-            "feasible_found": bool(feasible),
+            "LB": float(objective) if nontrivial else None,
+            "x_LB": [tuple(e) for e in assignment] if nontrivial else None,
+            "feasible_found": nontrivial,
         }
         ab.save_result(instance, heuristic_name, result_payload,
                        directory=result_dir, subgradient_output=synthetic_subg)

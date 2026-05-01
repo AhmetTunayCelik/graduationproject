@@ -396,6 +396,11 @@ def save_result(
     """
     os.makedirs(directory, exist_ok=True)
     fpath = os.path.join(directory, _result_filename(instance, heuristic_name))
+    e0_objective = float(sum(instance["cost_matrix"][i][j] for i, j in instance["E0"]))
+
+    def _is_nontrivial_obj(obj: Optional[float]) -> bool:
+        """True when the objective improves over the guaranteed E0 fallback."""
+        return obj is not None and float(obj) > e0_objective + 1e-9
 
     # Best feasible solution from the subgradient loop (x_LB) takes priority.
     # If subgradient_output is not supplied we fall back to the best feasible
@@ -409,8 +414,14 @@ def save_result(
         # Falls back to "is the incumbent something" if the field is absent
         # (legacy result caches predating feasible_found tracking).
         feasible_found = bool(
-            subgradient_output.get("feasible_found", incumbent_obj is not None)
+            subgradient_output.get(
+                "feasible_found", _is_nontrivial_obj(incumbent_obj)
+            )
         )
+        if not _is_nontrivial_obj(incumbent_obj):
+            incumbent_obj = None
+            incumbent_asgn = None
+            feasible_found = False
     else:
         # Fallback: scan heuristic_output for best feasible ordering
         ordering_variants = (
@@ -418,8 +429,13 @@ def save_result(
         )
         best_obj, best_asgn = None, None
         for rec in ordering_variants.values():
-            if rec.get("feasible") and (best_obj is None or rec["objective"] > best_obj):
-                best_obj = rec["objective"]
+            rec_obj = rec.get("objective")
+            if (
+                rec.get("feasible")
+                and _is_nontrivial_obj(rec_obj)
+                and (best_obj is None or rec_obj > best_obj)
+            ):
+                best_obj = rec_obj
                 best_asgn = rec["assignment"]
         incumbent_obj = best_obj
         incumbent_asgn = best_asgn
@@ -434,12 +450,15 @@ def save_result(
     candidate_obj: Optional[float] = None
     if "ordering_variants" in heur_out:
         for variant in heur_out.get("ordering_variants", {}).values():
-            if variant.get("feasible") and variant.get("objective") is not None:
+            if (
+                variant.get("feasible")
+                and _is_nontrivial_obj(variant.get("objective"))
+            ):
                 v_obj = float(variant["objective"])
                 if candidate_obj is None or v_obj > candidate_obj:
                     candidate_obj = v_obj
                     candidate_assign = variant.get("assignment")
-    elif heur_out.get("feasible") and heur_out.get("objective") is not None:
+    elif heur_out.get("feasible") and _is_nontrivial_obj(heur_out.get("objective")):
         candidate_obj = float(heur_out["objective"])
         candidate_assign = heur_out.get("assignment")
 
@@ -453,7 +472,7 @@ def save_result(
         "n": instance["n"],
         "seed": instance["seed"],
         "num_conflicts": len(instance["conflicts"]),
-        "E0_objective": sum(instance["cost_matrix"][i][j] for i, j in instance["E0"]),
+        "E0_objective": e0_objective,
         "heuristic": heuristic_name,
         "incumbent_objective": incumbent_obj,
         "incumbent_assignment": incumbent_asgn,

@@ -517,7 +517,8 @@ def table_bounds_gap(df: pd.DataFrame) -> pd.DataFrame:
                 mean_UB=("UB", "mean"),
                 mean_true_gap_pct=("true_gap_pct", "mean"),
                 mean_relative_gap_pct=("relative_gap_pct", "mean"),
-                seeds=("LB", "size"))
+                runs=("LB", "size"),
+                feasible_runs=("LB", "count"))
            .reset_index()
     )
     agg["category"] = agg["category"].map(_CATEGORY_DISPLAY).fillna(agg["category"])
