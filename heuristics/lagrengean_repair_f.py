@@ -554,6 +554,7 @@ def repair(
         len(assignment) == n
         and len(set(assignment)) == n
         and (len(c_e1) == 0 or not (asgn_flat[c_e1] & asgn_flat[c_e2]).any())
+        and (graph_edge_mask is None or not asgn_flat[~graph_edge_mask].any())
     )
     objective = (float(sum(cost[i, j] for i, j in assignment))
                  if feasible else 0.0)

@@ -59,6 +59,7 @@ _ALGO_COLORS: Dict[str, str] = {
     "lagrangean_repair":          "#0173B2",   # cb-blue
     "lagrangean_repair_2":        "#DE8F05",   # cb-orange
     "lagrangean_repair_lambda":   "#029E73",   # cb-green
+    "lagrangean_repair_savlr":    "#D55E00",   # cb-vermillion
     # Stable fallback colours for any new heuristics that show up.
     "_fallback_pool": [
         "#CC78BC", "#CA9161", "#FBAFE4", "#949494", "#ECE133", "#56B4E9",
