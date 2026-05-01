@@ -234,11 +234,13 @@ def repair(
     n: int,
     E0: ab.Assignment,
     graph_edges=None,
+    neighbours=None,
 ) -> Tuple[ab.Assignment, float, bool]:
     """Convert a Lagrangean subproblem solution into a feasible assignment."""
     cost = (cost_matrix if isinstance(cost_matrix, np.ndarray)
             else np.asarray(cost_matrix, dtype=np.float32))
-    neighbours = ab.build_conflict_adjacency_int(conflicts, n)
+    if neighbours is None:
+        neighbours = ab.build_conflict_adjacency_int(conflicts, n)
 
     graph_edge_mask = None
     if graph_edges is not None:
@@ -254,11 +256,7 @@ def repair(
     )
 
     assignment = sorted([divmod(eid, n) for eid in completed_ids], key=lambda e: e[0])
-    feasible = (
-        len(assignment) == n
-        and len(set(assignment)) == n
-        and len(ab.find_violations(assignment, conflicts, n)) == 0
-    )
+    feasible = ab.is_valid_assignment(assignment, conflicts, n, graph_edges)
     objective = float(sum(cost[i, j] for i, j in assignment)) if feasible else 0.0
     return assignment, objective, feasible
 
@@ -270,10 +268,12 @@ def run(
     n: int,
     E0: ab.Assignment,
     graph_edges=None,
+    neighbours=None,
     **kwargs,
 ) -> Tuple[ab.Assignment, float, bool]:
     """Uniform heuristic interface — alias of repair()."""
-    return repair(x_star, cost_matrix, conflicts, n, E0, graph_edges=graph_edges)
+    return repair(x_star, cost_matrix, conflicts, n, E0,
+                  graph_edges=graph_edges, neighbours=neighbours)
 
 
 __all__ = [

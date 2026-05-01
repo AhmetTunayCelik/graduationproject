@@ -16,8 +16,7 @@ Key design decisions (as per project supervisor's pseudocode)
 1. The seed feasible solution E0 is stored in each instance (costs = 0).
 2. Conflicts are only defined among non-E0 edges with distinct rows/columns.
 3. Subgradient update uses the *current* Lagrangian bound Z_Lag in the
-   step‑size numerator (not the best seen so far), and UB is unconditionally
-   set to Z_Lag every iteration (no running minimum).
+   step‑size numerator, while reported UB is the best dual bound seen so far.
 4. Step length is halved after 20 stagnant iterations (no LB improvement).
 5. All persistent artefacts (instances, heuristic results) are stored as JSON
    with a stable schema for downstream analysis. The subgradient loop is
@@ -157,6 +156,44 @@ def find_violations(
     flat_e2 = c[:, 2] * n + c[:, 3]
     violated = asgn_flat[flat_e1] & asgn_flat[flat_e2]
     return list(np.where(violated)[0])
+
+
+def is_valid_assignment(
+    assignment: Assignment,
+    conflicts: List[Conflict],
+    n: int,
+    graph_edges: Optional[List[Edge]] = None,
+) -> bool:
+    """Return True iff assignment satisfies APC primal feasibility.
+
+    Checks the assignment permutation constraints, explicit conflict-pair
+    constraints, bounds on edge indices, and optional sparse-graph membership.
+    """
+    if len(assignment) != n:
+        return False
+
+    rows = set()
+    cols = set()
+    normalised: Assignment = []
+    for edge in assignment:
+        if len(edge) != 2:
+            return False
+        i, j = int(edge[0]), int(edge[1])
+        if i < 0 or i >= n or j < 0 or j >= n:
+            return False
+        rows.add(i)
+        cols.add(j)
+        normalised.append((i, j))
+
+    if len(rows) != n or len(cols) != n:
+        return False
+
+    if graph_edges is not None:
+        allowed = {tuple(e) for e in graph_edges}
+        if any(edge not in allowed for edge in normalised):
+            return False
+
+    return len(find_violations(normalised, conflicts, n)) == 0
 
 
 # -----------------------------------------------------------------------------
@@ -516,12 +553,15 @@ def subgradient_solve(
 
     # Initial UB: unconstrained assignment optimum (valid upper bound)
     _, z0 = hungarian_max(cost)
-    UB = z0
+    UB_current = z0
+    UB_best = z0
+    UB = UB_best
 
     k = 0
     t_no_improve = 0
     pi_k = 2.0
     lambdas = np.zeros(num_conflicts, dtype=np.float32)
+    neighbours = build_conflict_adjacency_int(conflicts, n)
 
     # Precompute flat indices for conflicts (int32 is plenty: max id = n*n ≤ 150²)
     if num_conflicts > 0:
@@ -549,7 +589,8 @@ def subgradient_solve(
         iteration_history.append({
             "iter": int(k),
             "LB": float(LB),
-            "UB": float(UB),
+            "UB": float(UB_best),
+            "UB_current": float(UB_current),
             "pi_k": float(pi_k),
             "num_violations": int(num_violations),
             "elapsed_s": float(time.time() - t_start),
@@ -571,7 +612,10 @@ def subgradient_solve(
 
         x_star, z_star = hungarian_max(p_tilde)
         Z_Lag = z_star + float(np.sum(lambdas))
-        UB = Z_Lag        # per spec: unconditional assignment
+        UB_current = Z_Lag
+        if UB_current < UB_best:
+            UB_best = UB_current
+        UB = UB_best
 
         # Check feasibility of subproblem solution (reuse preallocated buffer)
         asgn_flat.fill(False)
@@ -627,6 +671,7 @@ def subgradient_solve(
                     x_hat, z_hat, feasible = repair_fn(
                         x_star, cost, conflicts, n, E0,
                         lambdas=lambdas, graph_edges=graph_edges,
+                        neighbours=neighbours,
                     )
                 except TypeError:
                     try:
@@ -673,7 +718,7 @@ def subgradient_solve(
             np.maximum(lambdas, 0, out=lambdas)
 
         if verbose and (k % 50 == 0 or k <= 5):
-            gap_pct = ((UB - LB) / max(abs(LB), 1e-10)) * 100.0
+            gap_pct = ((UB_best - LB) / max(abs(LB), 1e-10)) * 100.0
             print(f"  Iter {k:4d}: LB = {LB:.2f}, UB = {UB:.2f}, "
                   f"gap = {gap_pct:.2f}%, pi = {pi_k:.6f}")
 
@@ -683,8 +728,8 @@ def subgradient_solve(
 
     # Invariant: a valid Lagrangean relaxation must satisfy LB <= UB.
     # Use a tolerance to absorb float32 roundoff in the penalty arithmetic.
-    if feasible_found and LB > UB + 1e-3 * max(abs(UB), 1.0):
-        print(f"  [Warning] LB ({LB:.4f}) exceeds UB ({UB:.4f}); "
+    if feasible_found and LB > UB_best + 1e-3 * max(abs(UB_best), 1.0):
+        print(f"  [Warning] LB ({LB:.4f}) exceeds UB ({UB_best:.4f}); "
               f"likely a numerical issue or a bug in the repair heuristic.")
 
     # If only E0 was ever available, report None so downstream analysis
@@ -692,7 +737,7 @@ def subgradient_solve(
     if feasible_found:
         lb_out = float(LB)
         x_lb_out = [tuple(e) for e in x_LB]
-        gap_pct = ((UB - LB) / max(abs(LB), 1e-10)) * 100.0
+        gap_pct = ((UB_best - LB) / max(abs(LB), 1e-10)) * 100.0
     else:
         lb_out = None
         x_lb_out = None
@@ -701,14 +746,15 @@ def subgradient_solve(
     if verbose:
         print(f"\n  Termination: {terminated_reason}")
         if feasible_found:
-            print(f"  Final LB = {LB:.2f}, UB = {UB:.2f}, gap = {gap_pct:.2f}%")
+            print(f"  Final LB = {LB:.2f}, UB = {UB_best:.2f}, gap = {gap_pct:.2f}%")
         else:
-            print(f"  No feasible solution found beyond E0 (UB = {UB:.2f})")
+            print(f"  No feasible solution found beyond E0 (UB = {UB_best:.2f})")
         print(f"  Runtime = {runtime:.3f} s over {k} iterations")
 
     return {
         "LB": lb_out,
-        "UB": float(UB),
+        "UB": float(UB_best),
+        "UB_current": float(UB_current),
         "gap_pct": gap_pct,
         "feasible_found": feasible_found,
         "x_LB": x_lb_out,
@@ -724,6 +770,6 @@ def subgradient_solve(
 __all__ = [
     "Edge", "Assignment", "Conflict", "Instance", "RepairFn",
     "hungarian_max", "find_violations", "build_conflict_adjacency_int",
-    "subgradient_solve",
+    "is_valid_assignment", "subgradient_solve",
     "save_instance", "load_instance", "save_result",
 ]

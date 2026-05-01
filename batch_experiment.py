@@ -152,6 +152,7 @@ def run_single_combination(
     result_payload = {
         "subgradient_LB": subg.get("LB"),
         "subgradient_UB": subg.get("UB"),
+        "subgradient_UB_current": subg.get("UB_current"),
         "subgradient_iterations": subg.get("iterations"),
         "subgradient_runtime": subg.get("runtime_seconds"),
         "subgradient_terminated_reason": subg.get("terminated_reason"),

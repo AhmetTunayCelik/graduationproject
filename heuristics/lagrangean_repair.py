@@ -248,11 +248,13 @@ def repair(
     E0: ab.Assignment,
     ordering: str = DEFAULT_ORDERING,
     graph_edges=None,
+    neighbours=None,
 ) -> Tuple[ab.Assignment, float, bool]:
     """Convert a Lagrangean subproblem solution into a feasible assignment."""
     cost = (cost_matrix if isinstance(cost_matrix, np.ndarray)
             else np.asarray(cost_matrix, dtype=np.float32))
-    neighbours = ab.build_conflict_adjacency_int(conflicts, n)
+    if neighbours is None:
+        neighbours = ab.build_conflict_adjacency_int(conflicts, n)
 
     # Convert graph_edges (list/set of (i,j)) to bool mask if provided.
     graph_edge_mask = None
@@ -271,11 +273,7 @@ def repair(
     )
 
     assignment = sorted([divmod(eid, n) for eid in completed_ids], key=lambda e: e[0])
-    feasible = (
-        len(assignment) == n
-        and len(set(assignment)) == n
-        and len(ab.find_violations(assignment, conflicts, n)) == 0
-    )
+    feasible = ab.is_valid_assignment(assignment, conflicts, n, graph_edges)
     objective = float(sum(cost[i, j] for i, j in assignment)) if feasible else 0.0
     return assignment, objective, feasible
 
@@ -288,11 +286,12 @@ def run(
     E0: ab.Assignment,
     ordering: str = DEFAULT_ORDERING,
     graph_edges=None,
+    neighbours=None,
     **kwargs,
 ) -> Tuple[ab.Assignment, float, bool]:
     """Alias of repair() with uniform heuristic interface."""
     return repair(x_star, cost_matrix, conflicts, n, E0, ordering=ordering,
-                  graph_edges=graph_edges)
+                  graph_edges=graph_edges, neighbours=neighbours)
 
 
 def run_all_orderings(
@@ -302,19 +301,21 @@ def run_all_orderings(
     n: int,
     E0: ab.Assignment,
     graph_edges=None,
+    neighbours=None,
     **kwargs,   # absorb lambdas/mu when invoked from lambda-aware paths
 ) -> Dict[str, Dict[str, Any]]:
     """Run the repair heuristic under every ordering criterion."""
     cost = (cost_matrix if isinstance(cost_matrix, np.ndarray)
             else np.asarray(cost_matrix, dtype=np.float32))
-    neighbours = ab.build_conflict_adjacency_int(conflicts, n)
+    if neighbours is None:
+        neighbours = ab.build_conflict_adjacency_int(conflicts, n)
     records = {}
 
     for ordering in ORDERINGS:
         t0 = time.time()
         assignment, objective, feasible = repair(
             x_star, cost, conflicts, n, E0,
-            ordering=ordering, graph_edges=graph_edges,
+            ordering=ordering, graph_edges=graph_edges, neighbours=neighbours,
         )
         elapsed = time.time() - t0
         core_ids, _, _, _ = _phase1_core(x_star, cost, neighbours, n, ordering)

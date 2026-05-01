@@ -280,12 +280,14 @@ def repair(
     lambdas: Optional[List[float]] = None,
     mu: float = DEFAULT_MU,
     graph_edges=None,
+    neighbours=None,
 ) -> Tuple[ab.Assignment, float, bool]:
     """Convert a Lagrangean subproblem solution into a feasible assignment."""
     cost = (cost_matrix if isinstance(cost_matrix, np.ndarray)
             else np.asarray(cost_matrix, dtype=np.float32))
 
-    neighbours = ab.build_conflict_adjacency_int(conflicts, n)
+    if neighbours is None:
+        neighbours = ab.build_conflict_adjacency_int(conflicts, n)
     edge_lambda_sum = _build_edge_lambda_sum_arr(conflicts, lambdas, n)
 
     graph_edge_mask = None
@@ -307,11 +309,7 @@ def repair(
     )
 
     assignment = sorted([divmod(eid, n) for eid in completed_ids], key=lambda e: e[0])
-    feasible = (
-        len(assignment) == n
-        and len(set(assignment)) == n
-        and len(ab.find_violations(assignment, conflicts, n)) == 0
-    )
+    feasible = ab.is_valid_assignment(assignment, conflicts, n, graph_edges)
     objective = float(sum(cost[i, j] for i, j in assignment)) if feasible else 0.0
     return assignment, objective, feasible
 
@@ -326,13 +324,14 @@ def run(
     lambdas: Optional[List[float]] = None,
     mu: float = DEFAULT_MU,
     graph_edges=None,
+    neighbours=None,
     **kwargs,
 ) -> Tuple[ab.Assignment, float, bool]:
     """Standard heuristic interface expected by batch_experiment.py."""
     return repair(
         x_star=x_star, cost_matrix=cost_matrix, conflicts=conflicts,
         n=n, E0=E0, ordering=ordering, lambdas=lambdas, mu=mu,
-        graph_edges=graph_edges,
+        graph_edges=graph_edges, neighbours=neighbours,
     )
 
 
@@ -345,11 +344,13 @@ def run_all_orderings(
     lambdas: Optional[List[float]] = None,
     mu: float = DEFAULT_MU,
     graph_edges=None,
+    neighbours=None,
 ) -> Dict[str, Dict[str, Any]]:
     """Run the repair heuristic under every lambda-aware ordering criterion."""
     cost = (cost_matrix if isinstance(cost_matrix, np.ndarray)
             else np.asarray(cost_matrix, dtype=np.float32))
-    neighbours = ab.build_conflict_adjacency_int(conflicts, n)
+    if neighbours is None:
+        neighbours = ab.build_conflict_adjacency_int(conflicts, n)
     edge_lambda_sum = _build_edge_lambda_sum_arr(conflicts, lambdas, n)
 
     records = {}
@@ -359,7 +360,7 @@ def run_all_orderings(
         assignment, objective, feasible = repair(
             x_star=x_star, cost_matrix=cost, conflicts=conflicts,
             n=n, E0=E0, ordering=ordering, lambdas=lambdas, mu=mu,
-            graph_edges=graph_edges,
+            graph_edges=graph_edges, neighbours=neighbours,
         )
 
         elapsed = time.time() - t0

@@ -111,6 +111,8 @@ def run(
     lambdas: Optional[List[float]] = None,
     mu: float = DEFAULT_MU,
     max_micro_iters: int = DEFAULT_MAX_MICRO_ITERS,
+    graph_edges=None,
+    neighbours=None,
     **kwargs,
 ) -> Tuple[ab.Assignment, float, bool]:
     """Iterative Hungarian with dynamic tabu penalties.
@@ -147,7 +149,8 @@ def run(
     cost = cost.astype(np.float32, copy=False)
 
     nn = n * n
-    neighbours = ab.build_conflict_adjacency_int(conflicts, n)
+    if neighbours is None:
+        neighbours = ab.build_conflict_adjacency_int(conflicts, n)
 
     # 1D working cost vector — penalties are applied to flat edge IDs.
     C_working = cost.ravel().astype(np.float32, copy=True)
@@ -184,6 +187,8 @@ def run(
                 [(int(r), int(c)) for r, c in zip(row_ind, col_ind)],
                 key=lambda e: e[0],
             )
+            if not ab.is_valid_assignment(assignment, conflicts, n, graph_edges):
+                break
             objective = float(sum(cost[i, j] for i, j in assignment))
             return assignment, objective, True
 
@@ -197,7 +202,7 @@ def run(
     # defensively in case of a corrupted instance.
     e0_assignment = sorted([(int(i), int(j)) for i, j in E0],
                            key=lambda e: e[0])
-    feasible = len(ab.find_violations(e0_assignment, conflicts, n)) == 0
+    feasible = ab.is_valid_assignment(e0_assignment, conflicts, n, graph_edges)
     objective = (float(sum(cost[i, j] for i, j in e0_assignment))
                  if feasible else 0.0)
     return e0_assignment, objective, feasible

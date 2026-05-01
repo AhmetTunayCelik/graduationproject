@@ -136,13 +136,15 @@ def run(
     n: int = 0,
     E0: ab.Assignment = None,
     graph_edges=None,
+    neighbours=None,
     **kwargs,
 ) -> Tuple[ab.Assignment, float, bool]:
     """Run greedy baseline. `x_star` and `lambdas` are accepted and ignored
     (this baseline has no Lagrangean information by design)."""
     cost = (cost_matrix if isinstance(cost_matrix, np.ndarray)
             else np.asarray(cost_matrix, dtype=np.float32))
-    neighbours = ab.build_conflict_adjacency_int(conflicts or [], n)
+    if neighbours is None:
+        neighbours = ab.build_conflict_adjacency_int(conflicts or [], n)
 
     if graph_edges is not None:
         graph_edge_mask = np.zeros(n * n, dtype=bool)
@@ -166,11 +168,7 @@ def run(
         accepted = [i * n + j for i, j in E0]
 
     assignment = sorted([divmod(eid, n) for eid in accepted], key=lambda e: e[0])
-    feasible = (
-        len(assignment) == n
-        and len(set(assignment)) == n
-        and len(ab.find_violations(assignment, conflicts or [], n)) == 0
-    )
+    feasible = ab.is_valid_assignment(assignment, conflicts or [], n, graph_edges)
     objective = float(sum(cost[i, j] for i, j in assignment)) if feasible else 0.0
     return assignment, objective, feasible
 
