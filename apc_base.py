@@ -129,6 +129,8 @@ def find_violations(
     assignment: Assignment,
     conflicts: List[Conflict],
     n: int,
+    c_e1_flat: Optional[np.ndarray] = None,
+    c_e2_flat: Optional[np.ndarray] = None,
 ) -> List[int]:
     """Return indices of conflicts violated by an assignment.
 
@@ -140,6 +142,9 @@ def find_violations(
         Explicit conflict list.
     n : int
         Problem size.
+    c_e1_flat, c_e2_flat : np.ndarray, optional
+        Pre-computed flat edge-id arrays (avoids re-allocation when calling
+        from a context that already has them, e.g. the subgradient loop).
 
     Returns
     -------
@@ -151,10 +156,11 @@ def find_violations(
         asgn_flat[i * n + j] = True
     if not conflicts:
         return []
-    c = np.array(conflicts, dtype=int)
-    flat_e1 = c[:, 0] * n + c[:, 1]
-    flat_e2 = c[:, 2] * n + c[:, 3]
-    violated = asgn_flat[flat_e1] & asgn_flat[flat_e2]
+    if c_e1_flat is None or c_e2_flat is None:
+        c = np.array(conflicts, dtype=int)
+        c_e1_flat = c[:, 0] * n + c[:, 1]
+        c_e2_flat = c[:, 2] * n + c[:, 3]
+    violated = asgn_flat[c_e1_flat] & asgn_flat[c_e2_flat]
     return list(np.where(violated)[0])
 
 
@@ -202,7 +208,7 @@ def is_valid_assignment(
 
 _CATEGORY_PREFIX = {
     "standard":   "instance",
-    "goldilocks": "difficult_instance_goldilockzone",
+    "goldilocks": "difficult_instance_goldilocks",
     "degen":      "difficult_instance_degen",
     "extreme":    "difficult_instance_extreme",
 }
@@ -532,6 +538,9 @@ def subgradient_solve(
         Wall-clock budget in seconds (default 600 s = 10 min). The loop exits
         at the start of the first iteration that would exceed this limit.
         terminated_reason will be "time_limit" in that case.
+        Note: K_max fires for small n (subsecond) while time_limit fires for
+        large n; these are distinct termination regimes. Cross-n comparisons
+        of final bound quality should be grouped by terminated_reason.
     verbose : bool
         Print iteration progress.
 
@@ -579,6 +588,7 @@ def subgradient_solve(
     k = 0
     t_no_improve = 0
     pi_k = 2.0
+    num_pi_resets = 0   # pi_k is reset (up to 3x) when it drops below 1e-6
     lambdas = np.zeros(num_conflicts, dtype=np.float32)
     neighbours = build_conflict_adjacency_int(conflicts, n)
 
@@ -712,10 +722,15 @@ def subgradient_solve(
             else:
                 t_no_improve += 1
 
-        # Halve step length after stagnant iterations
+        # Halve step length after stagnant iterations; reset if near-zero
         if t_no_improve >= config.SUBG_STAGNATION_LIMIT:
             t_no_improve = 0
-            pi_k /= 2.0
+            new_pi = pi_k / 2.0
+            if new_pi < 1e-6 and num_pi_resets < 3:
+                num_pi_resets += 1
+                pi_k = 2.0 / (2.0 ** num_pi_resets)
+            else:
+                pi_k = new_pi
 
         # Subgradient direction (in-place into preallocated s_buf) and multiplier update
         if num_conflicts > 0:
@@ -737,7 +752,7 @@ def subgradient_solve(
             np.maximum(lambdas, 0, out=lambdas)
 
         if verbose and (k % 50 == 0 or k <= 5):
-            gap_pct = ((UB_best - LB) / max(abs(LB), 1e-10)) * 100.0
+            gap_pct = ((UB_best - LB) / max(abs(UB_best), 1e-10)) * 100.0
             print(f"  Iter {k:4d}: LB = {LB:.2f}, UB = {UB:.2f}, "
                   f"gap = {gap_pct:.2f}%, pi = {pi_k:.6f}")
 

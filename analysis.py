@@ -610,8 +610,9 @@ def table_wilcoxon_pairwise(df: pd.DataFrame) -> pd.DataFrame:
     for i, a in enumerate(algos):
         for b in algos[i + 1:]:
             paired = pivot[[a, b]].dropna()
-            if len(paired) < 6:
-                # Wilcoxon needs at least a handful of pairs to be meaningful.
+            if len(paired) < 10:
+                # Wilcoxon signed-rank requires ≥10 paired observations for
+                # the asymptotic approximation to hold reliably.
                 rows.append({"algo_A": a, "algo_B": b, "n_pairs": len(paired),
                              "median_diff_A_minus_B": np.nan,
                              "statistic": np.nan, "p_value": np.nan,
@@ -728,20 +729,29 @@ def fig_convergence_dynamics(df: pd.DataFrame, results_dir: str,
             if not histories:
                 continue
 
-            # Average LB/UB across seeds onto a common time grid (longest run).
-            longest = max(histories, key=len)
-            t_grid = np.array([rec.get("elapsed_s", np.nan) for rec in longest])
-            lb_stack, ub_stack = [], []
+            # Interpolate each seed onto a common time grid before averaging.
+            # Averaging on iteration index is wrong when seeds finish at different
+            # wall-clock times — the x-axis is elapsed_s, so we must align on time.
+            run_arrays = []
             for h in histories:
-                lbs = np.array([rec.get("LB", np.nan) for rec in h])
-                ubs = np.array([rec.get("UB", np.nan) for rec in h])
-                # Pad / truncate to t_grid length for averaging.
-                if len(lbs) < len(t_grid):
-                    pad = np.full(len(t_grid) - len(lbs), np.nan)
-                    lbs = np.concatenate([lbs, pad])
-                    ubs = np.concatenate([ubs, pad])
-                lb_stack.append(lbs[: len(t_grid)])
-                ub_stack.append(ubs[: len(t_grid)])
+                t_h = np.array([rec.get("elapsed_s", np.nan) for rec in h], dtype=float)
+                lb_h = np.array([rec.get("LB", np.nan) for rec in h], dtype=float)
+                ub_h = np.array([rec.get("UB", np.nan) for rec in h], dtype=float)
+                valid = ~np.isnan(t_h)
+                if valid.sum() >= 2:
+                    run_arrays.append((t_h[valid], lb_h[valid], ub_h[valid]))
+            if not run_arrays:
+                continue
+
+            max_t = max(float(t[-1]) for t, _, _ in run_arrays)
+            t_grid = np.linspace(0.0, max_t, 200)
+            lb_stack, ub_stack = [], []
+            for t_run, lb_run, ub_run in run_arrays:
+                # Hold last value for runs that ended before max_t.
+                lb_stack.append(np.interp(t_grid, t_run, lb_run,
+                                          left=np.nan, right=float(lb_run[-1])))
+                ub_stack.append(np.interp(t_grid, t_run, ub_run,
+                                          left=np.nan, right=float(ub_run[-1])))
             lb_mean = np.nanmean(np.vstack(lb_stack), axis=0)
             ub_mean = np.nanmean(np.vstack(ub_stack), axis=0)
 
@@ -900,7 +910,14 @@ def fig_performance_profile(df: pd.DataFrame, figures_dir: str,
         return
 
     # Performance ratio: r_{p,a} = best_LB_p / LB_{p,a}  (≥ 1, lower is better).
+    # Drop instances where every heuristic achieved LB ≤ 0 — the ratio is
+    # undefined there and the instance carries no discriminative information.
     best_per_instance = pivot.max(axis=1)
+    valid_mask = best_per_instance > 1e-9
+    pivot = pivot.loc[valid_mask]
+    best_per_instance = best_per_instance.loc[valid_mask]
+    if pivot.empty or pivot.shape[1] < 2:
+        return
     ratios = pivot.apply(lambda col: best_per_instance / col)
     ratios = ratios.replace([np.inf, -np.inf], np.nan)
 
@@ -1002,7 +1019,10 @@ def main() -> None:
         print("\n==Phase 2: Tables ===============================================")
         feas = _safe("feasibility_matrix", table_feasibility_matrix, df)
         _export_table(feas, "feasibility_matrix", tables_dir,
-                      caption="Success rate (\\%) per category × algorithm.",
+                      caption="Non-trivial feasibility rate (\\%) per category "
+                              "× algorithm. A run is counted successful only "
+                              "when it returns a feasible incumbent strictly "
+                              "better than the zero-cost E0 fallback.",
                       excel_writer=writer)
 
         runtime = _safe("runtime_pivot", table_runtime_pivot, df)

@@ -96,7 +96,9 @@ def _get_cached(
     Cache key uses (id(conflicts), len(conflicts), n) to detect when
     a new instance is loaded while staying O(1) to check.
     """
-    key = (id(conflicts), len(conflicts), n)
+    first = tuple(conflicts[0]) if conflicts else ()
+    last = tuple(conflicts[-1]) if conflicts else ()
+    key = (id(conflicts), len(conflicts), n, first, last)
     if _cache["key"] != key:
         c_e1, c_e2 = _precompute_conflict_arrays(conflicts, n)
         neighbours = _build_adjacency_fast(c_e1, c_e2, n)
@@ -198,16 +200,20 @@ def _compute_dual_weight(
         return 0.0
 
     obj = float(sum(cost[i, j] for i, j in x_star))
-    lam_sum = float(np.sum(np.asarray(lambdas, dtype=np.float32))) if lambdas else 0.0
+    lam_sum = (float(np.sum(np.asarray(lambdas, dtype=np.float32)))
+               if (lambdas is not None and len(lambdas) > 0) else 0.0)
 
     q_j = obj + lam_sum + (1.0 / _GAMMA) * g_norm_sq
     gap = q_j - obj
     weight = _ZETA * gap / g_norm_sq
 
     # Cap: dual_weight * max(edge_lambda) <= cost_range
+    # Filter out -1e15 sentinel edges (non-graph) AND E0 edges (cost=0) so that
+    # tight-cost instances (e.g. degen [95,100]) get cost_range≈5, not ≈100.
     max_lam = float(edge_lambda_sum.max()) if edge_lambda_sum.any() else 0.0
     if max_lam > 0.0:
-        cost_range = float(cost.max() - cost.min()) + 1.0
+        valid = cost.ravel()[cost.ravel() > 0]
+        cost_range = float(valid.max() - valid.min()) + 1.0 if valid.size > 0 else 1.0
         weight = min(weight, cost_range / max_lam)
 
     return max(weight, 0.0)
@@ -455,7 +461,10 @@ def _repair_multi_rho(
     (no repeated np.array(conflicts) allocation).
     """
     nn = n * n
-    cost_range = float(cost.max() - cost.min()) + 1.0
+    # Filter out -1e15 sentinels (non-graph edges) AND E0 edges (cost=0) so that
+    # tight-cost instances (e.g. degen [95,100]) get cost_range≈5, not ≈100.
+    valid = cost.ravel()[cost.ravel() > 0]
+    cost_range = float(valid.max() - valid.min()) + 1.0 if valid.size > 0 else 1.0
     rho = cost_range * _RHO_FRAC
     num_c = len(c_e1)
 
@@ -478,7 +487,9 @@ def _repair_multi_rho(
         )
 
         # Inline feasibility check (no find_violations call)
-        if len(completed_ids) == n and len(set(completed_ids)) == n:
+        rows_b = {eid // n for eid in completed_ids}
+        cols_b = {eid % n for eid in completed_ids}
+        if len(completed_ids) == n and len(rows_b) == n and len(cols_b) == n:
             asgn_buf.fill(False)
             for eid in completed_ids:
                 asgn_buf[eid] = True
@@ -550,9 +561,12 @@ def repair(
     asgn_flat = np.zeros(nn, dtype=bool)
     for eid in completed_ids:
         asgn_flat[eid] = True
+    rows_set = {e[0] for e in assignment}
+    cols_set = {e[1] for e in assignment}
     feasible = (
         len(assignment) == n
-        and len(set(assignment)) == n
+        and len(rows_set) == n
+        and len(cols_set) == n
         and (len(c_e1) == 0 or not (asgn_flat[c_e1] & asgn_flat[c_e2]).any())
         and (graph_edge_mask is None or not asgn_flat[~graph_edge_mask].any())
     )

@@ -18,20 +18,8 @@ def build_custom_batch(n_values, alphas, betas, seeds, cost_low, cost_high, inst
     created, skipped = 0, 0
 
     for n, alpha, beta, seed in itertools.product(n_values, alphas, betas, seeds):
-        # Check if file exists BEFORE generating (expensive operation)
-        temp_inst = {
-            "n": n,
-            "seed": seed,
-            "conflict_graph_density": beta,
-            "graph_density": alpha,
-            "instance_category": instance_category,
-        }
-        fpath = os.path.join(directory, ab._instance_filename(temp_inst))
-        if os.path.exists(fpath):
-            skipped += 1
-            continue
-
-        # Only generate if file doesn't exist
+        # Generate first so the filename reflects the *realized* (back-computed)
+        # density rather than the requested one, avoiding stale existence checks.
         instance = generate_instance(
             n=n,
             seed=seed,
@@ -41,6 +29,11 @@ def build_custom_batch(n_values, alphas, betas, seeds, cost_low, cost_high, inst
             cost_high=cost_high,
             instance_category=instance_category,
         )
+        fpath = os.path.join(directory, ab._instance_filename(instance))
+        if os.path.exists(fpath):
+            skipped += 1
+            continue
+
         ab.save_instance(instance, directory=directory)
         created += 1
 

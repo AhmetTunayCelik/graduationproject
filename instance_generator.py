@@ -252,16 +252,18 @@ def generate_instance(
             print(f"  [Warning] Only {len(conflicts)} of {num_conflicts} "
                   f"conflicts generated (attempt budget exhausted).")
 
-    # Back-compute effective density against the valid pool.
-    if conflict_graph_density is not None:
-        eff_conflict_density = conflict_graph_density
-    elif max_valid_pairs > 0:
+    # Always back-compute from the actual number of generated conflicts.
+    # When the large-graph rejection-sampling budget is exhausted this
+    # correctly reports the realized density instead of the requested target.
+    if max_valid_pairs > 0:
         eff_conflict_density = len(conflicts) / max_valid_pairs
     else:
         eff_conflict_density = 0.0
 
 # --- ISSUE C FIX: Mask non-graph edges so Gurobi & Subgradient respect sparsity ---
-    PENALTY = -999999.0
+    # Use -1e15 instead of -999999 to guard against lambda growth attacks:
+    # even if lambdas grow to millions, -1e15 stays lower than any reasonable edge cost
+    PENALTY = -1e15
 
     # We MUST include E0 edges to ensure the baseline remains strictly feasible
     valid_edges = set(tuple(e) for e in graph_edges)
@@ -338,20 +340,10 @@ def generate_batch(
     for n, c_density, g_density, seed in itertools.product(
         n_values, conflict_graph_densities, graph_densities, seeds
     ):
-        # Check if file exists BEFORE generating (expensive operation)
-        temp_inst = {
-            "n": n,
-            "seed": seed,
-            "conflict_graph_density": c_density,
-            "graph_density": g_density or 1.0,
-            "instance_category": instance_category,
-        }
-        fpath = os.path.join(directory, ab._instance_filename(temp_inst))
-        if not force and os.path.exists(fpath):
-            skipped += 1
-            continue
-
-        # Only generate if file doesn't exist
+        # Generate first so the filename reflects the *realized* (back-computed)
+        # density rather than the requested one.  The old temp_inst pre-check used
+        # the requested density, which could quantize to a different beta tag after
+        # integer rounding of num_conflicts, causing false "not found" on re-runs.
         instance = generate_instance(
             n=n,
             seed=seed,
@@ -359,6 +351,11 @@ def generate_batch(
             graph_density=g_density,
             instance_category=instance_category,
         )
+        fpath = os.path.join(directory, ab._instance_filename(instance))
+        if not force and os.path.exists(fpath):
+            skipped += 1
+            continue
+
         ab.save_instance(instance, directory=directory)
         created += 1
 

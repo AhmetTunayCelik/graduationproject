@@ -68,6 +68,15 @@ def solve_instance(
     cost = instance["cost_matrix"]
     conflicts = instance["conflicts"]
 
+    # Build edge list from graph_edges if present; fall back to complete graph.
+    # This excludes non-graph edges (cost = -1e15 sentinel) from Gurobi's model,
+    # giving presolve a clean formulation with no poisoned coefficients.
+    graph_edges_raw = instance.get("graph_edges")
+    if graph_edges_raw is not None:
+        edge_list = [tuple(e) for e in graph_edges_raw]
+    else:
+        edge_list = [(i, j) for i in range(n) for j in range(n)]
+
     model = gp.Model("MAX-APC")
     if not verbose:
         model.setParam("OutputFlag", config.GUROBI_OUTPUT_FLAG)
@@ -76,23 +85,27 @@ def solve_instance(
     if time_limit is not None:
         model.setParam("TimeLimit", time_limit)
 
-    # Decision variables: x[i,j] binary
+    # Decision variables: x[i,j] binary, one per valid graph edge only
     x = {}
-    for i in range(n):
-        for j in range(n):
-            x[i, j] = model.addVar(vtype=GRB.BINARY, name=f"x_{i}_{j}")
+    for i, j in edge_list:
+        x[i, j] = model.addVar(vtype=GRB.BINARY, name=f"x_{i}_{j}")
 
-    # Objective: maximise sum(cost * x)
-    obj = gp.quicksum(cost[i][j] * x[i, j] for i in range(n) for j in range(n))
+    # Objective: maximise sum(cost * x)  — graph-edge costs are 0 or positive
+    obj = gp.quicksum(cost[i][j] * x[i, j] for i, j in edge_list)
     model.setObjective(obj, GRB.MAXIMIZE)
 
-    # Assignment constraints: one per row
-    for i in range(n):
-        model.addConstr(gp.quicksum(x[i, j] for j in range(n)) == 1, name=f"row_{i}")
+    # Assignment constraints: each row and column covered exactly once,
+    # summing only over variables that exist (graph edges).
+    row_vars = {i: [] for i in range(n)}
+    col_vars = {j: [] for j in range(n)}
+    for i, j in edge_list:
+        row_vars[i].append(x[i, j])
+        col_vars[j].append(x[i, j])
 
-    # Assignment constraints: one per column
+    for i in range(n):
+        model.addConstr(gp.quicksum(row_vars[i]) == 1, name=f"row_{i}")
     for j in range(n):
-        model.addConstr(gp.quicksum(x[i, j] for i in range(n)) == 1, name=f"col_{j}")
+        model.addConstr(gp.quicksum(col_vars[j]) == 1, name=f"col_{j}")
 
     # Conflict constraints
     for c in conflicts:
@@ -107,7 +120,7 @@ def solve_instance(
     status = model.Status
     if status == GRB.OPTIMAL:
         obj_val = model.ObjVal
-        assignment = [(i, j) for i in range(n) for j in range(n) if x[i, j].X > 0.5]
+        assignment = [(i, j) for i, j in edge_list if x[i, j].X > 0.5]
         # assignment should already have n edges; sort for consistency
         assignment.sort(key=lambda e: e[0])
         return {
@@ -121,7 +134,7 @@ def solve_instance(
         }
     elif status == GRB.TIME_LIMIT:
         if model.SolCount > 0:
-            assignment = [(i, j) for i in range(n) for j in range(n) if x[i, j].X > 0.5]
+            assignment = [(i, j) for i, j in edge_list if x[i, j].X > 0.5]
             assignment.sort(key=lambda e: e[0])
             obj_val = model.ObjVal
             gap = model.MIPGap if hasattr(model, "MIPGap") else None
@@ -146,6 +159,8 @@ def solve_instance(
             "assignment": None,
             "runtime": runtime,
             "gap": None,
+            "nodes_explored": int(model.NodeCount),
+            "solutions_found": 0,
         }
     else:
         return {
@@ -154,6 +169,8 @@ def solve_instance(
             "assignment": None,
             "runtime": runtime,
             "gap": None,
+            "nodes_explored": int(model.NodeCount),
+            "solutions_found": int(model.SolCount),
         }
 
 
