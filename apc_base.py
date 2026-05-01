@@ -543,6 +543,7 @@ def subgradient_solve(
     terminated_reason = "iteration_limit"
     x_star = list(E0)      # placeholder
     iteration_history: List[Dict[str, float]] = []
+    num_violations = 0     # Initialize before loop; safe for _record_iter() on early time-limit
 
     def _record_iter():
         iteration_history.append({
