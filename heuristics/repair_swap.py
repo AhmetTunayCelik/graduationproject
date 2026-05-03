@@ -370,7 +370,9 @@ def _phase2_completion(
         except ValueError:
             pass
 
-    return [i * n + j for i, j in E0]
+    # Honest failure: every completion strategy failed. Return None instead
+    # of fabricating an E0 fallback.
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -539,33 +541,38 @@ def _repair_multi_rho(
             graph_edge_mask=graph_edge_mask,
         )
 
+        # Phase 2 returns None when every completion strategy failed; skip
+        # this rho trial and try the next one.
+        if completed_ids is None:
+            rho *= _BETA
+            continue
+
         rows_b = {eid // n for eid in completed_ids}
         cols_b = {eid % n for eid in completed_ids}
         if len(completed_ids) == n and len(rows_b) == n and len(cols_b) == n:
             asgn_buf.fill(False)
             for eid in completed_ids:
                 asgn_buf[eid] = True
-            
+
             has_conflict = (
                 num_c > 0
                 and (asgn_buf[c_e1] & asgn_buf[c_e2]).any()
             )
-            
+
             valid_graph = True
             # DÜZELTİLDİ: Geçersiz kenarlarda atama var mı diye kontrol edilmeli
             if graph_edge_mask is not None:
                 valid_graph = not asgn_buf[~graph_edge_mask].any()
-                
+
             if not has_conflict and valid_graph:
                 obj = float(np.sum(cost.ravel()[completed_ids]))
-                if obj > best_obj:
+                if best_ids is None or obj > best_obj:
                     best_obj = obj
                     best_ids = list(completed_ids)
         rho *= _BETA
 
-    if best_ids is not None:
-        return best_ids
-    return [i * n + j for i, j in E0]
+    # best_ids is None when no rho trial produced a valid feasible.
+    return best_ids
 
 
 # ---------------------------------------------------------------------------
@@ -601,6 +608,11 @@ def repair(
         dual_weight, c_e1, c_e2, graph_edge_mask=graph_edge_mask,
     )
 
+    # _repair_multi_rho returns None when no rho trial produced a valid
+    # feasible. Report honest failure.
+    if completed_ids is None:
+        return None, None, False
+
     # 2-opt Uygulanması
     completed_ids = _phase3_2opt_backtrack(
         completed_ids, cost, neighbours, n, c_e1, c_e2, graph_edge_mask
@@ -616,7 +628,7 @@ def repair(
 
     rows_set = {e[0] for e in assignment}
     cols_set = {e[1] for e in assignment}
-    
+
     # DÜZELTİLDİ: Son geçerlilik kontrolünde maskeleme kurgusu düzeltildi
     feasible = (
         len(assignment) == n
@@ -625,11 +637,11 @@ def repair(
         and (len(c_e1) == 0 or not (asgn_flat[c_e1] & asgn_flat[c_e2]).any())
         and (graph_edge_mask is None or not asgn_flat[~graph_edge_mask].any())
     )
-    
-    objective = (float(np.sum(cost.ravel()[completed_ids]))
-                 if feasible else 0.0)
 
-    return assignment, objective, feasible
+    if not feasible:
+        return None, None, False
+    objective = float(np.sum(cost.ravel()[completed_ids]))
+    return assignment, objective, True
 
 
 def run(

@@ -646,9 +646,10 @@ def _phase2_completion(
         return patched
 
     # ------------------------------------------------------------------
-    # Step 5: Tier 3 Fallback — Full E0 seed assignment
+    # Honest failure: every completion strategy failed. Report no feasible
+    # solution rather than fabricating an E0 fallback.
     # ------------------------------------------------------------------
-    return [i * n + j for i, j in E0]
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -698,7 +699,14 @@ def _repair_multi_rho(
             graph_edge_mask=graph_edge_mask,
         )
 
-        # Inline feasibility check (no find_violations call)
+        # Phase 2 returns None when every completion strategy failed; skip
+        # this rho trial and try the next one.
+        if completed_ids is None:
+            rho *= _BETA
+            continue
+
+        # Inline feasibility check (no find_violations call). Track best
+        # feasible (incl. obj=0 if a legitimate all-cost-0 completion arises).
         rows_b = {eid // n for eid in completed_ids}
         cols_b = {eid % n for eid in completed_ids}
         if len(completed_ids) == n and len(rows_b) == n and len(cols_b) == n:
@@ -714,15 +722,15 @@ def _repair_multi_rho(
                 for eid in completed_ids:
                     obj += cost[eid // n, eid % n]
                 obj = float(obj)
-                if obj > best_obj:
+                if best_ids is None or obj > best_obj:
                     best_obj = obj
                     best_ids = list(completed_ids)
 
         rho *= _BETA
 
-    if best_ids is not None:
-        return best_ids
-    return [i * n + j for i, j in E0]
+    # best_ids is None when no rho trial produced a valid feasible.
+    # Honest failure: no E0 fallback.
+    return best_ids
 
 
 # ---------------------------------------------------------------------------
@@ -765,6 +773,11 @@ def repair(
         dual_weight, c_e1, c_e2, graph_edge_mask=graph_edge_mask,
     )
 
+    # _repair_multi_rho returns None when no rho trial produced a valid
+    # feasible. Report honest failure rather than an E0 fabrication.
+    if completed_ids is None:
+        return None, None, False
+
     # --- Final result (inline feasibility, no find_violations) ---
     nn = n * n
     assignment = sorted(
@@ -782,9 +795,10 @@ def repair(
         and (len(c_e1) == 0 or not (asgn_flat[c_e1] & asgn_flat[c_e2]).any())
         and (graph_edge_mask is None or not asgn_flat[~graph_edge_mask].any())
     )
-    objective = (float(sum(cost[i, j] for i, j in assignment))
-                 if feasible else 0.0)
-    return assignment, objective, feasible
+    if not feasible:
+        return None, None, False
+    objective = float(sum(cost[i, j] for i, j in assignment))
+    return assignment, objective, True
 
 
 def run(

@@ -206,12 +206,12 @@ def _load_json(fpath: str) -> Optional[Dict]:
 def _heur_objective(data: Dict) -> Tuple[Optional[float], bool]:
     """Best feasible objective from a heuristic JSON, plus the failure flag.
 
-    Implements the academic-integrity rule:
-      - If `feasible_found` is explicitly False → NaN (failure).
-      - If `incumbent_objective` is None → NaN (failure).
-      - If `incumbent_objective` == 0.0 AND E0_objective == 0 → NaN
-        (the trivial E0 fallback).
-    Returns (objective_or_nan, ran_successfully).
+    Honesty rule (post E0-fallback removal):
+      - If `feasible_found` is explicitly False → None (failure).
+      - If `incumbent_objective` is None → None (failure).
+      - Otherwise → the objective value, including legitimate obj=0 if
+        the heuristic naturally produced a valid all-cost-0 assignment.
+    Returns (objective_or_none, ran_successfully).
     """
     if data.get("feasible_found") is False:
         return None, False
@@ -220,12 +220,7 @@ def _heur_objective(data: Dict) -> Tuple[Optional[float], bool]:
     if obj is None:
         return None, False
 
-    obj = float(obj)
-    e0 = float(data.get("E0_objective", 0.0) or 0.0)
-    # E0 has cost 0 by construction; treat a 0.0 incumbent as the trivial fallback.
-    if abs(obj) < 1e-12 and abs(e0) < 1e-12:
-        return None, False
-    return obj, True
+    return float(obj), True
 
 
 def _heur_runtime_total(data: Dict) -> Optional[float]:

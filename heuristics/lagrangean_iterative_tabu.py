@@ -198,14 +198,9 @@ def run(
         idx = np.fromiter(violating, dtype=np.int32, count=len(violating))
         C_working[idx] -= np.float32(TABU_PENALTY)
 
-    # Step 8: fallback. E0 is feasible by instance construction; verify
-    # defensively in case of a corrupted instance.
-    e0_assignment = sorted([(int(i), int(j)) for i, j in E0],
-                           key=lambda e: e[0])
-    feasible = ab.is_valid_assignment(e0_assignment, conflicts, n, graph_edges)
-    objective = (float(sum(cost[i, j] for i, j in e0_assignment))
-                 if feasible else 0.0)
-    return e0_assignment, objective, feasible
+    # Honest failure: tabu loop never produced a feasible solution.
+    # No artificial E0 fallback.
+    return None, None, False
 
 
 __all__ = [

@@ -17,7 +17,7 @@ Algorithm (single pass, deterministic given costs and conflicts):
     3. If fewer than n edges were accepted, fill the remaining rows/cols
        via Hungarian on the residual sub-matrix, masking out edges that
        conflict with the accepted set.
-    4. If that still fails, return the seed feasible solution E0.
+    4. If that still fails, report no feasible solution (returns None).
 
 The heuristic carries a module-level `SKIP_SUBGRADIENT = True` flag so
 batch_experiment.py runs it standalone, without paying the Lagrangean
@@ -164,13 +164,16 @@ def run(
         )
 
     if len(accepted) < n:
-        # Fall back to E0 (guaranteed feasible by instance construction).
-        accepted = [i * n + j for i, j in E0]
+        # Honest failure: greedy + Hungarian could not produce a complete
+        # assignment. No artificial E0 fallback.
+        return None, None, False
 
     assignment = sorted([divmod(eid, n) for eid in accepted], key=lambda e: e[0])
     feasible = ab.is_valid_assignment(assignment, conflicts or [], n, graph_edges)
-    objective = float(sum(cost[i, j] for i, j in assignment)) if feasible else 0.0
-    return assignment, objective, feasible
+    if not feasible:
+        return None, None, False
+    objective = float(sum(cost[i, j] for i, j in assignment))
+    return assignment, objective, True
 
 
 __all__ = ["HEURISTIC_NAME", "SKIP_SUBGRADIENT", "run"]

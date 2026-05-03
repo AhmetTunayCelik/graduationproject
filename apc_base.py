@@ -404,32 +404,23 @@ def save_result(
     fpath = os.path.join(directory, _result_filename(instance, heuristic_name))
     e0_objective = float(sum(instance["cost_matrix"][i][j] for i, j in instance["E0"]))
 
-    def _is_nontrivial_obj(obj: Optional[float]) -> bool:
-        """True when the objective improves over the guaranteed E0 fallback."""
-        return obj is not None and float(obj) > e0_objective + 1e-9
-
     # Best feasible solution from the subgradient loop (x_LB) takes priority.
     # If subgradient_output is not supplied we fall back to the best feasible
     # variant found among the heuristic's own ordering results.
+    # Honesty rule: any valid feasible assignment counts (including obj=0 if
+    # the heuristic naturally produced one). E0 is no longer a fallback.
     if subgradient_output is not None:
-        # `LB` is None when the loop found no feasible solution beyond E0.
+        # LB is None when the loop never found a valid feasible assignment.
         lb_val = subgradient_output.get("LB")
         incumbent_obj = float(lb_val) if lb_val is not None else None
         incumbent_asgn = _jsonify(subgradient_output.get("x_LB")) if subgradient_output.get("x_LB") else None
-        # Explicit failure flag for academic-integrity reporting in analysis.py.
-        # Falls back to "is the incumbent something" if the field is absent
-        # (legacy result caches predating feasible_found tracking).
+        # feasible_found from the subgradient loop is authoritative; any
+        # legitimate feasible (incl. obj=0) sets it True.
         feasible_found = bool(
-            subgradient_output.get(
-                "feasible_found", _is_nontrivial_obj(incumbent_obj)
-            )
+            subgradient_output.get("feasible_found", incumbent_obj is not None)
         )
-        if not _is_nontrivial_obj(incumbent_obj):
-            incumbent_obj = None
-            incumbent_asgn = None
-            feasible_found = False
     else:
-        # Fallback: scan heuristic_output for best feasible ordering
+        # Fallback path: scan heuristic_output for best feasible ordering.
         ordering_variants = (
             result.get("heuristic_output", {}).get("ordering_variants", {})
         )
@@ -438,10 +429,10 @@ def save_result(
             rec_obj = rec.get("objective")
             if (
                 rec.get("feasible")
-                and _is_nontrivial_obj(rec_obj)
+                and rec_obj is not None
                 and (best_obj is None or rec_obj > best_obj)
             ):
-                best_obj = rec_obj
+                best_obj = float(rec_obj)
                 best_asgn = rec["assignment"]
         incumbent_obj = best_obj
         incumbent_asgn = best_asgn
@@ -456,15 +447,12 @@ def save_result(
     candidate_obj: Optional[float] = None
     if "ordering_variants" in heur_out:
         for variant in heur_out.get("ordering_variants", {}).values():
-            if (
-                variant.get("feasible")
-                and _is_nontrivial_obj(variant.get("objective"))
-            ):
+            if variant.get("feasible") and variant.get("objective") is not None:
                 v_obj = float(variant["objective"])
                 if candidate_obj is None or v_obj > candidate_obj:
                     candidate_obj = v_obj
                     candidate_assign = variant.get("assignment")
-    elif heur_out.get("feasible") and _is_nontrivial_obj(heur_out.get("objective")):
+    elif heur_out.get("feasible") and heur_out.get("objective") is not None:
         candidate_obj = float(heur_out["objective"])
         candidate_assign = heur_out.get("assignment")
 
@@ -572,11 +560,13 @@ def subgradient_solve(
         print(f"  Subgradient solver — n = {n}, |C| = {num_conflicts}")
         print(f"{'=' * 60}")
 
-    # Initialise LB with E0 (cost = 0 by construction)
-    LB = float(sum(cost[i, j] for i, j in E0))
-    x_LB = list(E0)
-    # True only when a real feasible solution better than E0 is found in the loop.
-    # Stays False if the run exits on time/iteration limit with only E0 as fallback.
+    # No artificial baseline: start with no incumbent. LB stays None until a
+    # repair / LP iteration produces a *valid* feasible assignment.
+    LB: Optional[float] = None
+    x_LB: Optional[List[Tuple[int, int]]] = None
+    # True the moment any valid feasible assignment is observed (incl. obj=0
+    # if the LP / repair naturally produces one — that's an honest finding).
+    # Stays False when the run exits without any heuristic / LP-feasible call.
     feasible_found = False
 
     # Initial UB: unconstrained assignment optimum (valid upper bound)
@@ -617,7 +607,7 @@ def subgradient_solve(
     def _record_iter():
         iteration_history.append({
             "iter": int(k),
-            "LB": float(LB),
+            "LB": float(LB) if LB is not None else None,
             "UB": float(UB_best),
             "UB_current": float(UB_current),
             "pi_k": float(pi_k),
@@ -672,17 +662,17 @@ def subgradient_solve(
                 slackness_ok = True
 
             if slackness_ok:
-                if obj > LB:
+                if LB is None or obj > LB:
                     LB = obj
                     x_LB = list(x_star)
-                    feasible_found = True
+                feasible_found = True
                 if verbose:
                     print(f"  Iter {k}: feasible & complementary slackness → optimum")
                 terminated_reason = "complementary_slackness"
                 _record_iter()
                 break
 
-            if obj > LB:
+            if LB is None or obj > LB:
                 LB = obj
                 x_LB = list(x_star)
                 feasible_found = True
@@ -712,12 +702,21 @@ def subgradient_solve(
                         x_hat, z_hat, feasible = repair_fn(
                             x_star, cost, conflicts, n
                         )
-                if feasible and z_hat > LB:
-                    LB = float(z_hat)
-                    x_LB = list(x_hat)
+                if feasible and x_hat is not None and z_hat is not None:
+                    # Heuristic returned a *valid* feasible assignment.
+                    # Update the incumbent if it is the first one or strictly
+                    # improves over the current LB; either way, record that
+                    # feasibility has been achieved.
+                    if LB is None or z_hat > LB:
+                        LB = float(z_hat)
+                        x_LB = list(x_hat)
+                        t_no_improve = 0
+                    else:
+                        t_no_improve += 1
                     feasible_found = True
-                    t_no_improve = 0
                 else:
+                    # Heuristic explicitly reported no feasible solution
+                    # (returned None / feasible=False). No artificial fallback.
                     t_no_improve += 1
             else:
                 t_no_improve += 1
@@ -745,16 +744,25 @@ def subgradient_solve(
                 terminated_reason = "small_subgradient"
                 _record_iter()
                 break
-            alpha = np.float32(pi_k * (Z_Lag - LB) / s_norm_sq)
+            # When no feasible has been found yet, fall back to 0 as the
+            # implicit lower bound: any feasible MAX-APC solution has obj >= 0
+            # since costs are non-negative on graph edges. This keeps the
+            # Polyak step formula well-defined throughout the run.
+            lb_for_step = LB if LB is not None else 0.0
+            alpha = np.float32(pi_k * (Z_Lag - lb_for_step) / s_norm_sq)
             # In-place update: lambdas += alpha * s_buf; clip to [0, ∞)
             s_buf *= alpha
             lambdas += s_buf
             np.maximum(lambdas, 0, out=lambdas)
 
         if verbose and (k % 50 == 0 or k <= 5):
-            gap_pct = ((UB_best - LB) / max(abs(UB_best), 1e-10)) * 100.0
-            print(f"  Iter {k:4d}: LB = {LB:.2f}, UB = {UB:.2f}, "
-                  f"gap = {gap_pct:.2f}%, pi = {pi_k:.6f}")
+            if LB is not None:
+                gap_pct = ((UB_best - LB) / max(abs(UB_best), 1e-10)) * 100.0
+                print(f"  Iter {k:4d}: LB = {LB:.2f}, UB = {UB:.2f}, "
+                      f"gap = {gap_pct:.2f}%, pi = {pi_k:.6f}")
+            else:
+                print(f"  Iter {k:4d}: LB = (none yet), UB = {UB:.2f}, "
+                      f"pi = {pi_k:.6f}")
 
         _record_iter()
 
@@ -762,13 +770,13 @@ def subgradient_solve(
 
     # Invariant: a valid Lagrangean relaxation must satisfy LB <= UB.
     # Use a tolerance to absorb float32 roundoff in the penalty arithmetic.
-    if feasible_found and LB > UB_best + 1e-3 * max(abs(UB_best), 1.0):
+    if feasible_found and LB is not None and LB > UB_best + 1e-3 * max(abs(UB_best), 1.0):
         print(f"  [Warning] LB ({LB:.4f}) exceeds UB ({UB_best:.4f}); "
               f"likely a numerical issue or a bug in the repair heuristic.")
 
-    # If only E0 was ever available, report None so downstream analysis
-    # excludes these runs from objective averages rather than pulling them to 0.
-    if feasible_found:
+    # When no valid feasible was ever found, LB stays None and downstream
+    # analysis treats this as honest "no feasible found" (not a 0-cost win).
+    if feasible_found and LB is not None:
         lb_out = float(LB)
         x_lb_out = [tuple(e) for e in x_LB]
         gap_pct = ((UB_best - LB) / max(abs(LB), 1e-10)) * 100.0
@@ -779,10 +787,10 @@ def subgradient_solve(
 
     if verbose:
         print(f"\n  Termination: {terminated_reason}")
-        if feasible_found:
+        if feasible_found and LB is not None:
             print(f"  Final LB = {LB:.2f}, UB = {UB_best:.2f}, gap = {gap_pct:.2f}%")
         else:
-            print(f"  No feasible solution found beyond E0 (UB = {UB_best:.2f})")
+            print(f"  No feasible solution found (UB = {UB_best:.2f})")
         print(f"  Runtime = {runtime:.3f} s over {k} iterations")
 
     return {

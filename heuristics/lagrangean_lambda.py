@@ -470,9 +470,10 @@ def _phase2_completion(
         return patched
 
     # ------------------------------------------------------------------
-    # Step 5: Tier 3 Fallback — Full E0 seed assignment
+    # Honest failure: every completion strategy failed. Report no feasible
+    # solution rather than fabricating an E0 fallback.
     # ------------------------------------------------------------------
-    return [i * n + j for i, j in E0]
+    return None
 
 
 # -----------------------------------------------------------------------------
@@ -516,10 +517,16 @@ def repair(
         ordering=ordering, E0=E0, mu=mu, graph_edge_mask=graph_edge_mask,
     )
 
+    # Phase 2 returns None when every completion strategy failed.
+    if completed_ids is None:
+        return None, None, False
+
     assignment = sorted([divmod(eid, n) for eid in completed_ids], key=lambda e: e[0])
     feasible = ab.is_valid_assignment(assignment, conflicts, n, graph_edges)
-    objective = float(sum(cost[i, j] for i, j in assignment)) if feasible else 0.0
-    return assignment, objective, feasible
+    if not feasible:
+        return None, None, False
+    objective = float(sum(cost[i, j] for i, j in assignment))
+    return assignment, objective, True
 
 
 def run(
@@ -580,11 +587,11 @@ def run_all_orderings(
         records[ordering] = {
             "ordering": ordering,
             "ordering_label": ORDERING_LABELS[ordering],
-            "objective": float(objective),
+            "objective": float(objective) if objective is not None else None,
             "feasible": bool(feasible),
             "runtime_seconds": float(elapsed),
             "core_size": int(len(core_ids)),
-            "assignment": [tuple(e) for e in assignment],
+            "assignment": [tuple(e) for e in assignment] if assignment is not None else None,
         }
 
     return records
