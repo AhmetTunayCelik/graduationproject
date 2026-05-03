@@ -95,7 +95,9 @@ def run_single_combination(
     full CPU cost of producing its own dual bounds. This makes runtime
     comparisons against Gurobi fair.
     """
-    result_path = os.path.join(result_dir, ab._result_filename(instance, heuristic_name))
+    heur_dir = os.path.join(result_dir, heuristic_name)
+    os.makedirs(heur_dir, exist_ok=True)
+    result_path = os.path.join(heur_dir, ab._result_filename(instance, heuristic_name))
     if not force_heuristic and os.path.exists(result_path):
         return False
 
@@ -138,7 +140,7 @@ def run_single_combination(
             "feasible_found": nontrivial,
         }
         ab.save_result(instance, heuristic_name, result_payload,
-                       directory=result_dir, subgradient_output=synthetic_subg)
+                       directory=heur_dir, subgradient_output=synthetic_subg)
         del result_payload, synthetic_subg
         gc.collect()
         return True
@@ -199,7 +201,7 @@ def run_single_combination(
             "runtime_seconds": elapsed,
         }
 
-    ab.save_result(instance, heuristic_name, result_payload, directory=result_dir, subgradient_output=subg)
+    ab.save_result(instance, heuristic_name, result_payload, directory=heur_dir, subgradient_output=subg)
 
     # Free large in-memory data (subgradient buffers, conflict adjacency, etc.)
     # before the next heuristic-instance pair to prevent OS-level swapping under
@@ -261,28 +263,65 @@ def main():
 
     total_heuristic_calls = 0
     saved = 0
+    interrupted = False
 
-    # Process one heuristic across all instances, then move to next heuristic
-    for hname, hmod, hrun, has_ord in to_run:
-        if not args.quiet:
-            print(f"\n{hname}: processing {len(instances)} instances...")
-
-        for inst in instances:
-            # Each run_single_combination checks if result exists and skips if present
-            is_new = run_single_combination(inst, hname, hmod, hrun, has_ord,
-                                            args.result_dir, args.force_heuristic)
-            if is_new:
-                saved += 1
-                status = "generated"
-            else:
-                status = "skipped"
-            total_heuristic_calls += 1
-
+    # Process one heuristic across all instances, then move to next heuristic.
+    # Ctrl+C handling: in most cases KeyboardInterrupt fires during the
+    # heuristic call, well before save_result() — no file is written. In the
+    # narrow window where the interrupt lands AFTER save_result completed but
+    # BEFORE the "generated" line is printed, we delete the just-saved file
+    # to keep the invariant "interrupt => current instance not saved".
+    # Atomic writes protect against mid-write kills (.tmp written but never
+    # renamed -> destination doesn't exist).
+    try:
+        for hname, hmod, hrun, has_ord in to_run:
             if not args.quiet:
-                instance_name = f"n{inst['n']}_a{int(round((inst.get('graph_density', 1.0) or 1.0) * 10)):02d}_b{int(round(inst.get('conflict_graph_density', 0) * 1000)):03d}_s{inst['seed']}"
-                print(f"  [{total_heuristic_calls}] {instance_name:40s} -> {status}")
+                print(f"\n{hname}: processing {len(instances)} instances...")
 
-    print(f"\nBatch finished. Saved {saved} new results (out of {total_heuristic_calls} calls).")
+            for inst in instances:
+                total_heuristic_calls += 1
+                try:
+                    # Each run_single_combination checks if result exists and skips if present
+                    is_new = run_single_combination(inst, hname, hmod, hrun, has_ord,
+                                                    args.result_dir, args.force_heuristic)
+                except KeyboardInterrupt:
+                    # If the save squeezed in before the interrupt, drop the
+                    # file so re-running treats this instance as unprocessed.
+                    # Skipped (force_heuristic=True): an existing file would
+                    # have come from a *prior* batch — leave it alone.
+                    if not args.force_heuristic:
+                        result_path = os.path.join(
+                            args.result_dir, hname,
+                            ab._result_filename(inst, hname),
+                        )
+                        try:
+                            if os.path.exists(result_path):
+                                os.remove(result_path)
+                        except OSError:
+                            pass
+                    raise
+
+                if is_new:
+                    saved += 1
+                    status = "generated"
+                else:
+                    status = "skipped"
+
+                if not args.quiet:
+                    result_name = ab._result_filename(inst, hname)
+                    print(f"  [{total_heuristic_calls}] {result_name:60s} -> {status}")
+    except KeyboardInterrupt:
+        # User hit Ctrl+C. The current instance is guaranteed not saved (the
+        # inner handler above either let the interrupt land before save, or
+        # cleaned up a freshly-saved file). Re-running picks it up cleanly.
+        interrupted = True
+        print("\nInterrupted by user. Current instance not saved. Stopping batch.")
+
+    if interrupted:
+        print(f"Batch stopped. Saved {saved} new results before interrupt "
+              f"(out of {total_heuristic_calls} calls).")
+    else:
+        print(f"\nBatch finished. Saved {saved} new results (out of {total_heuristic_calls} calls).")
 
     if args.tracemalloc:
         import tracemalloc
