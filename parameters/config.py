@@ -66,6 +66,10 @@ HEURISTIC_TIME_LIMIT = 600.0  # 10 minutes maximum runtime (subgradient + repair
 # unfair advantage and make runtime claims indefensible.
 GUROBI_THREADS = 1
 GUROBI_OUTPUT_FLAG = 0     # 0 = quiet, 1 = verbose
+# Soft memory cap (GB). Prevents silent OOM kills on dense Goldilocks/Extreme
+# instances by raising GRB.MEM_LIMIT instead of process termination. Set to
+# None to disable. Requires Gurobi 9.5+ for SoftMemLimit parameter.
+GUROBI_MEM_LIMIT_GB = 8.0
 
 # ---------------------------------------------------------
 # LAGRANGEAN SUBGRADIENT SETTINGS

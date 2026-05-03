@@ -240,23 +240,32 @@ def _heur_runtime_total(data: Dict) -> Optional[float]:
     return float(sum(parts))
 
 
-def _gurobi_objective(data: Dict) -> Tuple[Optional[float], str, Optional[float], int, int]:
-    """Best objective Gurobi found, status, gap, nodes explored, solutions found.
+def _gurobi_objective(data: Dict) -> Tuple[Optional[float], str, Optional[float], int, int, Optional[float], Optional[float]]:
+    """Best objective Gurobi found, status, gap, nodes explored, solutions
+    found, dual bound (ObjBound), first-feasible-time.
 
     nodes_explored  — B&B tree size; high values signal a weak LP relaxation.
     solutions_found — 0 means timeout-without-incumbent (hardest case).
-    Both fields are absent in legacy JSONs and fall back to NaN / 0.
+    best_bound      — Gurobi's dual bound (ObjBound); enables LP-bound
+                      comparison vs. Lagrangean UB. Absent in legacy JSONs.
+    first_feasible  — wall-clock to first incumbent (callback-tracked).
+                      Absent in legacy JSONs.
+    Legacy fields gracefully degrade to None / NaN.
     """
     status = data.get("status", "UNKNOWN")
     obj = data.get("objective")
     gap = data.get("gap")
     nodes = data.get("nodes_explored")
     sols  = data.get("solutions_found")
+    bound = data.get("best_bound")
+    first_t = data.get("first_feasible_time")
     obj_out = float(obj) if obj is not None else None
     gap_out = float(gap) if gap is not None else None
     nodes_out = int(nodes) if nodes is not None else np.nan
     sols_out  = int(sols)  if sols  is not None else np.nan
-    return obj_out, status, gap_out, nodes_out, sols_out
+    bound_out = float(bound) if bound is not None else None
+    first_out = float(first_t) if first_t is not None else np.nan
+    return obj_out, status, gap_out, nodes_out, sols_out, bound_out, first_out
 
 
 def load_master(results_dir: str = "results") -> pd.DataFrame:
@@ -278,7 +287,10 @@ def load_master(results_dir: str = "results") -> pd.DataFrame:
             continue
 
         if meta["kind"] == "optimal":
-            obj, status, gap, nodes, sols = _gurobi_objective(data)
+            obj, status, gap, nodes, sols, bound, first_t = _gurobi_objective(data)
+            # UB = Gurobi dual bound (ObjBound) when present; legacy results
+            # without the field fall back to obj (= old behaviour: UB == LB).
+            ub_value = bound if bound is not None else obj
             optimal_records.append({
                 **meta,
                 "objective":           obj,
@@ -286,11 +298,12 @@ def load_master(results_dir: str = "results") -> pd.DataFrame:
                 "runtime_total":       float(data.get("runtime", np.nan)) if data.get("runtime") is not None else np.nan,
                 "gap_solver":          gap,
                 "feasible":            obj is not None,
-                # Bounds: for Gurobi we treat the optimum (or best incumbent) as both LB and UB.
+                # LB = best incumbent objective. UB = ObjBound when available
+                # (newly-tracked dual bound); otherwise obj for back-compat.
                 "LB":                  obj,
-                "UB":                  obj,
+                "UB":                  ub_value,
                 "iter_count":          np.nan,
-                "first_feasible_time": np.nan,
+                "first_feasible_time": first_t,
                 "nodes_explored":      nodes,
                 "solutions_found":     sols,
             })
