@@ -279,7 +279,7 @@ def main():
 
             if not args.quiet:
                 instance_name = f"n{inst['n']}_a{int(round((inst.get('graph_density', 1.0) or 1.0) * 10)):02d}_b{int(round(inst.get('conflict_graph_density', 0) * 1000)):03d}_s{inst['seed']}"
-                print(f"  [{total_heuristic_calls}] {instance_name:40s} → {status}")
+                print(f"  [{total_heuristic_calls}] {instance_name:40s} -> {status}")
 
     print(f"\nBatch finished. Saved {saved} new results (out of {total_heuristic_calls} calls).")
 

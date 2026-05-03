@@ -1,4 +1,4 @@
-Bug Fixes and Correctness Improvements (post-last-pull)
+Bug Fixes and Correctness Improvements (post-last-pull) p
 
 Fix #1 — Instance filename existence check (instance_generator.py, generate_difficult_instances.py)
 The existence check now uses the realized (back-computed) beta density for the filename, not the requested one. Previously, integer rounding of num_conflicts could produce a different beta tag than expected, causing the check to report "not found" and overwrite valid files on re-runs.
