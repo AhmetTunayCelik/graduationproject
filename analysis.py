@@ -125,8 +125,8 @@ def _save(fig: plt.Figure, path: str) -> None:
 # Filename grammar (see apc_base._result_filename / _instance_filename):
 #   standard heuristic result:    {heur}_n{n}_a{aa}_b{bbb}_s{seed}.json
 #   difficult heuristic result:   difficult_{heur}_{cat}_n{n}_a{aa}_b{bbb}_s{seed}.json
-#   Gurobi optimal (standard):    optimal_n{n}_a{aa}_b{bbb}_s{seed}.json
-#   Gurobi optimal (difficult):   difficult_optimal_{cat}_n{n}_a{aa}_b{bbb}_s{seed}.json
+#   Gurobi result (standard):     gurobi_n{n}_a{aa}_b{bbb}_s{seed}.json
+#   Gurobi result (difficult):    difficult_gurobi_{cat}_n{n}_a{aa}_b{bbb}_s{seed}.json
 # alpha tag = round(α*10):02d   (0.4 → "04",  1.0 → "10")
 # beta  tag = round(β*1000):03d (0.01 → "010", 0.001 → "001")
 
@@ -153,26 +153,26 @@ def _parse_result_filename(fname: str) -> Optional[Dict]:
 
     # head is one of:
     #   "instance"             → not a result, skip
-    #   "optimal"              → Gurobi standard
+    #   "gurobi"               → Gurobi standard
     #   "{heur}"               → heuristic standard
     #   "difficult_instance_{cat}" → not a result, skip (it's an instance file)
-    #   "difficult_optimal_{cat}"  → Gurobi difficult
+    #   "difficult_gurobi_{cat}"   → Gurobi difficult
     #   "difficult_{heur}_{cat}"   → heuristic difficult
     if head == "instance":
         return None
     if head.startswith("difficult_instance_"):
         return None
 
-    if head == "optimal":
+    if head == "gurobi":
         return {"algo": GUROBI_LABEL, "kind": "optimal", "category": "standard",
                 "n": n, "alpha": alpha_tag / 10.0, "beta": beta_tag / 1000.0,
                 "seed": seed}
 
     if head.startswith("difficult_"):
         rest = head[len("difficult_"):]
-        # Difficult Gurobi: "optimal_{cat}"
-        if rest.startswith("optimal_"):
-            cat = rest[len("optimal_"):]
+        # Difficult Gurobi: "gurobi_{cat}"
+        if rest.startswith("gurobi_"):
+            cat = rest[len("gurobi_"):]
             if cat not in _DIFFICULT_CATEGORIES:
                 return None
             return {"algo": GUROBI_LABEL, "kind": "optimal", "category": cat,
@@ -264,7 +264,7 @@ def _gurobi_objective(data: Dict) -> Tuple[Optional[float], str, Optional[float]
 
 
 def load_master(results_dir: str = "results") -> pd.DataFrame:
-    """Load every result_*.json + optimal_*.json into a single long-format frame.
+    """Load every result_*.json + gurobi_*.json into a single long-format frame.
 
     One row per (algo, category, n, alpha, beta, seed). Failures → NaN
     objective so downstream `.mean()` / `.std()` skip them naturally.
@@ -272,7 +272,7 @@ def load_master(results_dir: str = "results") -> pd.DataFrame:
     heuristic_records: List[Dict] = []
     optimal_records: List[Dict] = []
 
-    files = sorted(glob.glob(os.path.join(results_dir, "*.json")))
+    files = sorted(glob.glob(os.path.join(results_dir, "*", "*.json")))
     for fpath in files:
         meta = _parse_result_filename(fpath)
         if meta is None:
