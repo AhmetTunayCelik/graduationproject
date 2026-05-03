@@ -129,8 +129,9 @@ def run_single_combination(
             },
         }
         # Synthetic subgradient_output so save_result reports feasibility correctly.
-        e0_objective = sum(instance["cost_matrix"][i][j] for i, j in E0)
-        nontrivial = bool(feasible and objective > e0_objective + 1e-9)
+        # Any honest feasible (including obj=0 if naturally found) counts.
+        # Honest failures return (None, None, False) so feasible=False there.
+        nontrivial = bool(feasible and objective is not None)
         synthetic_subg = {
             "LB": float(objective) if nontrivial else None,
             "x_LB": [tuple(e) for e in assignment] if nontrivial else None,
