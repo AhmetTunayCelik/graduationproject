@@ -287,11 +287,18 @@ def write_run_metadata(directory: str, batch_label: str) -> str:
     except Exception:
         scipy_ver = "unknown"
 
-    try:
-        import gurobipy
-        gurobi_ver = ".".join(str(x) for x in gurobipy.gurobi.version())
-    except Exception:
-        gurobi_ver = "unavailable"
+    # Only import gurobipy when this batch is actually a Gurobi run.
+    # Importing gurobipy during a heuristic batch is undesirable: it prints a
+    # license banner and (on some platforms) installs its own SIGINT handler
+    # that can swallow Ctrl-C interrupts.
+    if batch_label == "gurobi":
+        try:
+            import gurobipy
+            gurobi_ver = ".".join(str(x) for x in gurobipy.gurobi.version())
+        except Exception:
+            gurobi_ver = "unavailable"
+    else:
+        gurobi_ver = "not_used_in_batch"
 
     metadata = {
         "batch_label": batch_label,
