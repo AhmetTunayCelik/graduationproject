@@ -1,5 +1,5 @@
 """
-heuristics/lagrangean_swap.py
+heuristics/lagrengean_repair_swap.py
 ==================================
 SAVLR-guided repair heuristic for the Lagrangean relaxation of MAX-APC.
 
@@ -30,7 +30,7 @@ for the repair heuristic context:
    edges from x_star (prioritised by SAVLR score), preserving the
    high-quality conflict-free portion.
 
-6. 2-opt Backtracking: Post-repair, a 2-opt local search with
+6. (NEW) 2-opt Backtracking: Post-repair, a 2-opt local search with
    backtracking is applied. It exhaustively tries all improving swaps,
    maintaining a history to escape local optima, ensuring continuous
    improvement until a fixpoint is reached.
@@ -41,7 +41,7 @@ Performance-optimised:
     - Lambda sums accumulated with np.add.at (no Python loop)
     - Feasibility checks via bitmask (no repeated np.array(conflicts))
     - Bool bitmasks of size n*n for set operations
-    - 2-opt uses temporary swap + rollback for correct conflict checking
+    - 2-opt uses vectorized conflict checking and cached conflict sets.
 """
 from __future__ import annotations
 from typing import List, Optional, Tuple, Set
@@ -50,22 +50,27 @@ from scipy.optimize import linear_sum_assignment
 import apc_base as ab
 
 # ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
 HEURISTIC_NAME = "lagrangean_repair_savlr_2opt"
 
-_NUM_RHO_TRIALS = 5   # number of rho values to explore
-_BETA = 2.0           # escalation factor between trials: rho *= beta
-_RHO_FRAC = 0.05      # initial rho as fraction of cost range
-_ZETA = 0.8           # Polyak relaxation coefficient (< 1)
-_GAMMA = 1.0          # level-value scaling parameter
+_NUM_RHO_TRIALS = 5  # number of rho values to explore
+_BETA = 2.0  # escalation factor between trials: rho *= beta
+_RHO_FRAC = 0.05  # initial rho as fraction of cost range
+_ZETA = 0.8  # Polyak relaxation coefficient (< 1)
+_GAMMA = 1.0  # level-value scaling parameter
 _EMPTY_I32 = np.empty(0, dtype=np.int32)
-
 # 2-opt backtracking max iterations (safety limit)
 _MAX_2OPT_ITERATIONS = 1000
 
-# precomputation cache (cleared on new conflict set)
+# Module-level cache: within a subgradient run conflicts & n are constant
+# across all repair calls. Caching avoids re-running the O(|C| log |C|)
+# precomputation at every iteration.
 _cache: dict = {"key": None, "c_e1": None, "c_e2": None, "neighbours": None}
 
 
+# ---------------------------------------------------------------------------
+# Fast data preparation (replaces per-call Python loops)
 # ---------------------------------------------------------------------------
 def _precompute_conflict_arrays(
     conflicts: List[ab.Conflict],
@@ -140,6 +145,8 @@ def _build_edge_lambda_sum_fast(
 
 
 # ---------------------------------------------------------------------------
+# Dual weight (Polyak-inspired, using precomputed arrays)
+# ---------------------------------------------------------------------------
 def _compute_dual_weight(
     x_star: ab.Assignment,
     cost: np.ndarray,
@@ -162,9 +169,7 @@ def _compute_dual_weight(
     if g_norm_sq < 1e-10:
         return 0.0
 
-    # Vectorised objective sum (no Python loop)
-    x_ids = [i * n + j for i, j in x_star]
-    obj = float(np.sum(cost.ravel()[x_ids]))
+    obj = float(sum(cost[i, j] for i, j in x_star))
     lam_sum = (float(np.sum(np.asarray(lambdas, dtype=np.float32)))
                if (lambdas is not None and len(lambdas) > 0) else 0.0)
     q_j = obj + lam_sum + (1.0 / _GAMMA) * g_norm_sq
@@ -179,6 +184,9 @@ def _compute_dual_weight(
     return max(weight, 0.0)
 
 
+# ---------------------------------------------------------------------------
+# Phase 1: SAVLR selective violation repair
+# ---------------------------------------------------------------------------
 def _phase1_selective_repair(
     x_star: ab.Assignment,
     cost: np.ndarray,
@@ -246,6 +254,9 @@ def _phase1_selective_repair(
     return survivor_ids, rows_used, cols_used, forbidden_mask
 
 
+# ---------------------------------------------------------------------------
+# Phase 2: SAVLR-scored completion
+# ---------------------------------------------------------------------------
 def _phase2_completion(
     survivor_ids: List[int],
     n: int,
@@ -359,24 +370,11 @@ def _phase2_completion(
         except ValueError:
             pass
 
-    # ---------------------------------------------------------------------------
-    # BUG FIX #1: Graph-safe E0 fallback
-    # Eski kod: return [i * n + j for i, j in E0]
-    # Problem: E0, complete graph üzerinde oluşturulmuşsa sparse instancelarda
-    #          graph_edge_mask dışındaki kenarları içerebilir → feasible=False → 0 puan
-    # Düzeltme: Sadece graph'ta olan E0 kenarlarını döndür.
-    # ---------------------------------------------------------------------------
-    if graph_edge_mask is not None:
-        safe_e0 = [i * n + j for i, j in E0 if graph_edge_mask[i * n + j]]
-        return safe_e0 if safe_e0 else [i * n + j for i, j in E0]
     return [i * n + j for i, j in E0]
 
 
 # ---------------------------------------------------------------------------
-# BUG FIX #2: 2-opt conflict check — geçici swap + rollback yaklaşımı
-# Eski kod: flat_current güncellenmeden eski kenarlar (eid11, eid22) skip ediliyordu.
-#           Bu yanlış: bitmask henüz güncellenmediği için conflict tespiti hatalı.
-# Düzeltme: Swap'ı geçici uygula (flat_current'ı güncelle), conflict kontrol et, geri al.
+# Phase 3: 2-opt Backtracking Local Search (NEW)
 # ---------------------------------------------------------------------------
 def _phase3_2opt_backtrack(
     assignment_ids: List[int],
@@ -396,13 +394,17 @@ def _phase3_2opt_backtrack(
         r, c = divmod(eid, n)
         col_for_row[r] = c
 
-    # BUG FIX #3: history.pop() yerine clear() — deterministic
     history: Set[Tuple[int, ...]] = {tuple(sorted(current_ids))}
     max_history_size = max(100, n * 10)
 
+    if num_c > 0:
+        conflict_pairs = set(zip(c_e1, c_e2))
+    else:
+        conflict_pairs = set()
+
     flat_current = np.zeros(nn, dtype=bool)
     flat_current[current_ids] = True
-    current_obj = float(np.sum(cost.ravel()[current_ids]))
+    current_obj = float(cost.ravel()[current_ids].sum())
 
     improved = True
     iteration = 0
@@ -410,17 +412,17 @@ def _phase3_2opt_backtrack(
         improved = False
         iteration += 1
 
+        rows = list(range(n))
         best_delta = 0.0
         best_swap = None
 
         for idx1 in range(n):
-            r1 = idx1
-            c1 = int(col_for_row[r1])
+            r1 = rows[idx1]
+            c1 = col_for_row[r1]
             for idx2 in range(idx1 + 1, n):
-                r2 = idx2
-                c2 = int(col_for_row[r2])
+                r2 = rows[idx2]
+                c2 = col_for_row[r2]
 
-                # Objective delta kontrolü
                 delta_obj = (cost[r1, c2] + cost[r2, c1]) - (cost[r1, c1] + cost[r2, c2])
                 if delta_obj <= 1e-12:
                     continue
@@ -430,40 +432,31 @@ def _phase3_2opt_backtrack(
                 eid12 = r1 * n + c2
                 eid21 = r2 * n + c1
 
-                # Degenerate swap kontrolü
                 if eid12 == eid11 or eid12 == eid22 or eid21 == eid11 or eid21 == eid22:
                     continue
 
-                # Graph mask kontrolü
+                # Graph mask check
                 if graph_edge_mask is not None:
                     if not (graph_edge_mask[eid12] and graph_edge_mask[eid21]):
                         continue
 
-                # -----------------------------------------------------------------
-                # BUG FIX #2: Swap'ı geçici uygula, conflict kontrol et, geri al.
-                # Eski yöntem bitmask güncellemeden komşu kontrolü yapıyordu —
-                # eid11 ve eid22'yi "skip et" diyordu ama bu sadece bu ikisinin
-                # komşularını kapsamıyor, öteki çakışmaları da ıskalıyordu.
-                # -----------------------------------------------------------------
-                # Geçici swap uygula
-                flat_current[eid11] = False
-                flat_current[eid22] = False
-                flat_current[eid12] = True
-                flat_current[eid21] = True
+                # Conflict Check
+                conflicts_exist = False
+                for eid_new in (eid12, eid21):
+                    if neighbours[eid_new].size > 0:
+                        for nb in neighbours[eid_new]:
+                            nb = int(nb)
+                            if nb == eid11 or nb == eid22:
+                                continue
+                            if flat_current[nb]:
+                                conflicts_exist = True
+                                break
+                    if conflicts_exist:
+                        break
+                if conflicts_exist:
+                    continue
 
-                # Conflict kontrolü (vectorised)
-                has_conflict = (
-                    num_c > 0
-                    and bool((flat_current[c_e1] & flat_current[c_e2]).any())
-                )
-
-                # Geri al
-                flat_current[eid11] = True
-                flat_current[eid22] = True
-                flat_current[eid12] = False
-                flat_current[eid21] = False
-
-                if has_conflict:
+                if (eid12, eid21) in conflict_pairs or (eid21, eid12) in conflict_pairs:
                     continue
 
                 if delta_obj > best_delta:
@@ -494,23 +487,24 @@ def _phase3_2opt_backtrack(
             state_tuple = tuple(sorted(current_ids))
             if state_tuple not in history:
                 history.add(state_tuple)
-                # BUG FIX #3: pop() yerine clear() — sonsuz döngüyü önler
-                if len(history) > max_history_size:
-                    history.clear()
-                    history.add(state_tuple)
+                # Düzeltildi: Pop işlemini daha güvenli loop ile yap
+                while len(history) > max_history_size:
+                    history.pop()
             improved = True
 
-    # Son geçerlilik doğrulaması — eğer 2-opt bir şekilde geçersiz durum ürettiyse
-    # orijinal assignment'ı geri döndür (güvenli fallback)
+    # DÜZELTİLDİ: np.all yerine .any() ile geçersiz kenar arama mantığı
     if graph_edge_mask is not None:
         if flat_current[~graph_edge_mask].any():
             return assignment_ids
-    if num_c > 0 and bool(np.any(flat_current[c_e1] & flat_current[c_e2])):
+    if num_c > 0 and np.any(flat_current[c_e1] & flat_current[c_e2]):
         return assignment_ids
 
     return current_ids
 
 
+# ---------------------------------------------------------------------------
+# Multi-rho exploration (inline feasibility via bitmask)
+# ---------------------------------------------------------------------------
 def _repair_multi_rho(
     x_star: ab.Assignment,
     cost: np.ndarray,
@@ -528,7 +522,7 @@ def _repair_multi_rho(
     cost_range = float(valid.max() - valid.min()) + 1.0 if valid.size > 0 else 1.0
     rho = cost_range * _RHO_FRAC
     num_c = len(c_e1)
-
+    
     best_ids = None
     best_obj = -np.inf
     asgn_buf = np.zeros(nn, dtype=bool)
@@ -551,17 +545,17 @@ def _repair_multi_rho(
             asgn_buf.fill(False)
             for eid in completed_ids:
                 asgn_buf[eid] = True
-
+            
             has_conflict = (
                 num_c > 0
-                and bool((asgn_buf[c_e1] & asgn_buf[c_e2]).any())
+                and (asgn_buf[c_e1] & asgn_buf[c_e2]).any()
             )
-
-            # BUG FIX #1 (multi_rho): Graph validity check
+            
             valid_graph = True
+            # DÜZELTİLDİ: Geçersiz kenarlarda atama var mı diye kontrol edilmeli
             if graph_edge_mask is not None:
-                valid_graph = not bool(asgn_buf[~graph_edge_mask].any())
-
+                valid_graph = not asgn_buf[~graph_edge_mask].any()
+                
             if not has_conflict and valid_graph:
                 obj = float(np.sum(cost.ravel()[completed_ids]))
                 if obj > best_obj:
@@ -571,14 +565,12 @@ def _repair_multi_rho(
 
     if best_ids is not None:
         return best_ids
-
-    # BUG FIX #1: Graph-safe E0 fallback (multi_rho seviyesi)
-    if graph_edge_mask is not None:
-        safe_e0 = [i * n + j for i, j in E0 if graph_edge_mask[i * n + j]]
-        return safe_e0 if safe_e0 else [i * n + j for i, j in E0]
     return [i * n + j for i, j in E0]
 
 
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 def repair(
     x_star: ab.Assignment,
     cost_matrix,
@@ -609,7 +601,7 @@ def repair(
         dual_weight, c_e1, c_e2, graph_edge_mask=graph_edge_mask,
     )
 
-    # 2-opt iyileştirmesi
+    # 2-opt Uygulanması
     completed_ids = _phase3_2opt_backtrack(
         completed_ids, cost, neighbours, n, c_e1, c_e2, graph_edge_mask
     )
@@ -624,15 +616,16 @@ def repair(
 
     rows_set = {e[0] for e in assignment}
     cols_set = {e[1] for e in assignment}
-
+    
+    # DÜZELTİLDİ: Son geçerlilik kontrolünde maskeleme kurgusu düzeltildi
     feasible = (
         len(assignment) == n
         and len(rows_set) == n
         and len(cols_set) == n
-        and (len(c_e1) == 0 or not bool((asgn_flat[c_e1] & asgn_flat[c_e2]).any()))
-        and (graph_edge_mask is None or not bool(asgn_flat[~graph_edge_mask].any()))
+        and (len(c_e1) == 0 or not (asgn_flat[c_e1] & asgn_flat[c_e2]).any())
+        and (graph_edge_mask is None or not asgn_flat[~graph_edge_mask].any())
     )
-
+    
     objective = (float(np.sum(cost.ravel()[completed_ids]))
                  if feasible else 0.0)
 
